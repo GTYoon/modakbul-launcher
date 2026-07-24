@@ -32,6 +32,15 @@ if ($server.address -ne '116.126.112.66:25565') {
 if ($server.minecraftVersion -ne '1.21.1') {
     $failures.Add("Minecraft 버전이 다릅니다: $($server.minecraftVersion)")
 }
+if ($server.javaOptions.supported -ne '>=21 <22') {
+    $failures.Add("Java 지원 범위가 21 전용이 아닙니다: $($server.javaOptions.supported)")
+}
+if ([int]$server.javaOptions.suggestedMajor -ne 21) {
+    $failures.Add("권장 Java 주 버전이 21이 아닙니다: $($server.javaOptions.suggestedMajor)")
+}
+if ($server.javaOptions.distribution -ne 'TEMURIN') {
+    $failures.Add("Java 배포판이 TEMURIN이 아닙니다: $($server.javaOptions.distribution)")
+}
 
 $modules = @($server.modules)
 $fabricModules = @($modules | Where-Object type -eq 'Fabric')
@@ -96,6 +105,9 @@ if ($failures.Count -gt 0) {
     distribution = $DistributionPath
     serverAddress = $server.address
     minecraft = $server.minecraftVersion
+    javaSupported = $server.javaOptions.supported
+    javaSuggestedMajor = $server.javaOptions.suggestedMajor
+    javaDistribution = $server.javaOptions.distribution
     totalModules = $modules.Count
     fabricMods = $fabricMods.Count
     files = $files.Count
