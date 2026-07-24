@@ -1,0 +1,51 @@
+appId: 'kr.modakbul.season1.launcher'
+productName: '모닥불 Season 1'
+artifactName: 'Modakbul-Season-1-setup-${version}.${ext}'
+
+copyright: 'Copyright © 2026 모닥불 Season 1 운영팀'
+
+asar: true
+compression: 'maximum'
+
+files:
+  - '!{dist,.gitignore,.vscode,docs,dev-app-update.yml,.nvmrc,eslint.config.mjs}'
+
+extraResources:
+  - 'libraries'
+
+# Windows Configuration
+win: 
+  target: 
+    - target: 'nsis'
+      arch: 'x64'
+
+# Windows Installer Configuration
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+
+# macOS Configuration
+mac:
+  target:
+    - target: 'dmg'
+      arch:
+        - 'x64'
+        - 'arm64'
+  artifactName: '${productName}-setup-${version}-${arch}.${ext}'
+  category: 'public.app-category.games'
+
+# Linux Configuration
+linux: 
+  target: 'AppImage'
+  maintainer: '모닥불 Season 1 운영팀'
+  vendor: '모닥불 Season 1'
+  synopsis: '모닥불 Season 1 전용 Minecraft 런처'
+  description: '모드, 설정, 리소스팩과 업데이트를 자동으로 관리하는 모닥불 Season 1 전용 런처입니다.'
+  category: 'Game'
+
+
+directories:
+  buildResources: 'build'
+  output: 'dist'
