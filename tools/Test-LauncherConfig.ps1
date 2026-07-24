@@ -60,6 +60,17 @@ if (Test-Path -LiteralPath $distroPath) {
     }
 }
 
+$languageLoaderPath = Join-Path $projectRoot 'app\assets\js\langloader.js'
+if (Test-Path -LiteralPath $languageLoaderPath) {
+    $languageLoaderContent = [IO.File]::ReadAllText(
+        $languageLoaderPath,
+        [Text.Encoding]::UTF8
+    )
+    if ($languageLoaderContent -notmatch "loadLanguage\('ko_KR'\)") {
+        $failures.Add('런처 기본 한국어 언어팩이 활성화되지 않았습니다.')
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host '런처 설정 검증 실패:' -ForegroundColor Red
     $failures | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }
