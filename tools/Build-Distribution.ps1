@@ -285,6 +285,11 @@ $distribution = [ordered]@{
             version = $Version
             address = $ServerAddress
             minecraftVersion = '1.21.1'
+            javaOptions = [ordered]@{
+                supported = '>=21 <22'
+                suggestedMajor = 21
+                distribution = 'TEMURIN'
+            }
             mainServer = $true
             autoconnect = $true
             modules = @($modules)
