@@ -11,6 +11,10 @@ $requiredFiles = @(
     'app\assets\js\distromanager.js'
     'app\assets\js\ipcconstants.js'
     'app\assets\lang\ko_KR.toml'
+    'app\assets\images\SealCircle.png'
+    'app\assets\images\LoadingSeal.png'
+    'app\assets\images\backgrounds\modakbul.png'
+    'build\icon.png'
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -68,6 +72,14 @@ if (Test-Path -LiteralPath $languageLoaderPath) {
     )
     if ($languageLoaderContent -notmatch "loadLanguage\('ko_KR'\)") {
         $failures.Add('런처 기본 한국어 언어팩이 활성화되지 않았습니다.')
+    }
+}
+
+$uiBinderPath = Join-Path $projectRoot 'app\assets\js\scripts\uibinder.js'
+if (Test-Path -LiteralPath $uiBinderPath) {
+    $uiBinderContent = [IO.File]::ReadAllText($uiBinderPath, [Text.Encoding]::UTF8)
+    if ($uiBinderContent -notmatch 'backgrounds/modakbul\.png') {
+        $failures.Add('모닥불 전용 런처 배경이 활성화되지 않았습니다.')
     }
 }
 
