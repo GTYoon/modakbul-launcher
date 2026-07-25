@@ -1,6 +1,7 @@
 // Requirements
 const os     = require('os')
 const semver = require('semver')
+const { FullRepair: SettingsFullRepair } = require('helios-core/dl')
 
 const DropinModUtil  = require('./assets/js/dropinmodutil')
 const { MSFT_OPCODE, MSFT_REPLY_TYPE, MSFT_ERROR } = require('./assets/js/ipcconstants')
@@ -1498,6 +1499,8 @@ const settingsUpdateChangelogTitle = settingsTabUpdate.getElementsByClassName('s
 const settingsUpdateChangelogText  = settingsTabUpdate.getElementsByClassName('settingsChangelogText')[0]
 const settingsUpdateChangelogCont  = settingsTabUpdate.getElementsByClassName('settingsChangelogContainer')[0]
 const settingsUpdateActionButton   = document.getElementById('settingsUpdateActionButton')
+const settingsUpdateLogger         = LoggerUtil.getLogger('GameFileUpdater')
+let settingsGameUpdateRunning      = false
 
 /**
  * Update the properties of the update action button.
@@ -1511,6 +1514,95 @@ function settingsUpdateButtonStatus(text, disabled = false, handler = null){
     settingsUpdateActionButton.disabled = disabled
     if(handler != null){
         settingsUpdateActionButton.onclick = handler
+    }
+}
+
+/**
+ * Check and download the selected server's managed game files.
+ *
+ * The launcher's Electron updater only updates the launcher executable.
+ * The distribution repair module is the canonical updater for mods,
+ * configs, translations, and resource packs.
+ */
+async function checkGameFilesAndLauncher(){
+    if(settingsGameUpdateRunning){
+        return
+    }
+
+    settingsGameUpdateRunning = true
+    let fullRepairModule = null
+
+    try {
+        settingsUpdateTitle.innerHTML = Lang.queryJS('settings.updates.gameFilesCheckingTitle')
+        settingsUpdateButtonStatus(Lang.queryJS('settings.updates.gameFilesCheckingButton', { percent: 0 }), true)
+
+        const distro = await DistroAPI.refreshDistributionOrFallback()
+        const server = distro.getServerById(ConfigManager.getSelectedServer())
+        if(server == null){
+            throw new Error(Lang.queryJS('settings.updates.gameFilesNoServer'))
+        }
+
+        fullRepairModule = new SettingsFullRepair(
+            ConfigManager.getCommonDirectory(),
+            ConfigManager.getInstanceDirectory(),
+            ConfigManager.getLauncherDirectory(),
+            ConfigManager.getSelectedServer(),
+            DistroAPI.isDevMode()
+        )
+        fullRepairModule.spawnReceiver()
+        fullRepairModule.childProcess.on('error', err => settingsUpdateLogger.error('Update worker error.', err))
+
+        const invalidFileCount = await fullRepairModule.verifyFiles(percent => {
+            settingsUpdateButtonStatus(
+                Lang.queryJS('settings.updates.gameFilesCheckingButton', { percent: Math.floor(percent) }),
+                true
+            )
+        })
+
+        if(invalidFileCount > 0){
+            settingsUpdateTitle.innerHTML = Lang.queryJS('settings.updates.gameFilesDownloadingTitle', { count: invalidFileCount })
+            settingsUpdateButtonStatus(
+                Lang.queryJS('settings.updates.gameFilesDownloadingButton', { percent: 0 }),
+                true
+            )
+            await fullRepairModule.download(percent => {
+                settingsUpdateButtonStatus(
+                    Lang.queryJS('settings.updates.gameFilesDownloadingButton', { percent: Math.floor(percent) }),
+                    true
+                )
+            })
+            settingsUpdateTitle.innerHTML = Lang.queryJS('settings.updates.gameFilesUpdatedTitle', {
+                count: invalidFileCount,
+                version: server.rawServer.version
+            })
+        } else {
+            settingsUpdateTitle.innerHTML = Lang.queryJS('settings.updates.gameFilesLatestTitle', {
+                version: server.rawServer.version
+            })
+        }
+
+        settingsUpdateVersionTitle.innerHTML = Lang.queryJS('settings.updates.gamePackVersionTitle')
+        settingsUpdateVersionValue.innerHTML = server.rawServer.version
+        settingsUpdateVersionCheck.style.background = null
+        settingsUpdateButtonStatus(Lang.queryJS('settings.updates.gameFilesDoneButton'), false, checkGameFilesAndLauncher)
+
+        // Keep the executable updater as a second, independent update channel.
+        if(!isDev){
+            ipcRenderer.send('autoUpdateAction', 'checkForUpdate')
+        }
+    } catch(err) {
+        settingsUpdateLogger.error('Unable to update managed game files.', err)
+        settingsUpdateTitle.innerHTML = Lang.queryJS('settings.updates.gameFilesFailedTitle')
+        settingsUpdateButtonStatus(Lang.queryJS('settings.updates.gameFilesRetryButton'), false, checkGameFilesAndLauncher)
+    } finally {
+        if(fullRepairModule != null){
+            try {
+                fullRepairModule.destroyReceiver()
+            } catch(err) {
+                settingsUpdateLogger.warn('Unable to stop update worker cleanly.', err)
+            }
+        }
+        settingsGameUpdateRunning = false
     }
 }
 
@@ -1538,12 +1630,11 @@ function populateSettingsUpdateInformation(data){
         settingsUpdateTitle.innerHTML = Lang.queryJS('settings.updates.latestVersionTitle')
         settingsUpdateChangelogCont.style.display = 'none'
         populateVersionInformation(remote.app.getVersion(), settingsUpdateVersionValue, settingsUpdateVersionTitle, settingsUpdateVersionCheck)
-        settingsUpdateButtonStatus(Lang.queryJS('settings.updates.checkForUpdatesButton'), false, () => {
-            if(!isDev){
-                ipcRenderer.send('autoUpdateAction', 'checkForUpdate')
-                settingsUpdateButtonStatus(Lang.queryJS('settings.updates.checkingForUpdatesButton'), true)
-            }
-        })
+        settingsUpdateButtonStatus(
+            Lang.queryJS('settings.updates.checkForUpdatesButton'),
+            false,
+            checkGameFilesAndLauncher
+        )
     }
 }
 
