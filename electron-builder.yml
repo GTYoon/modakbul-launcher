@@ -15,6 +15,9 @@ extraResources:
 
 # Windows Configuration
 win: 
+  # No signing certificate is configured. Avoid Windows-only code-sign tooling so
+  # local and CI release builds remain reproducible without symlink privileges.
+  signAndEditExecutable: false
   target: 
     - target: 'nsis'
       arch: 'x64'

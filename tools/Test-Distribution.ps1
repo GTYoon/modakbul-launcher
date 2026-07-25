@@ -50,7 +50,7 @@ $files = @($modules | Where-Object type -eq 'File')
 if ($fabricModules.Count -ne 1) {
     $failures.Add("Fabric 로더 모듈 수가 1이 아닙니다: $($fabricModules.Count)")
 }
-if ($fabricMods.Count -lt 147) {
+if ($fabricMods.Count -lt 146) {
     $failures.Add("클라이언트 모드 수가 기준보다 적습니다: $($fabricMods.Count)")
 }
 if ($files.Count -lt 1829) {
@@ -85,6 +85,30 @@ $clientLocalization = @(
 )
 if ($clientLocalization.Count -ne 1) {
     $failures.Add("클라이언트 전용 한글화 패치 수가 1이 아닙니다: $($clientLocalization.Count)")
+}
+
+$pastureLoot = @(
+    $modules |
+        Where-Object {
+            $_.name -match 'PastureLoot' -or
+            $_.artifact.path -match 'pastureLoot|pasture-loot' -or
+            $_.artifact.url -match 'pastureLoot|pasture-loot'
+        }
+)
+if ($pastureLoot.Count -gt 0) {
+    $failures.Add("제거 대상 PastureLoot가 포함되었습니다: $($pastureLoot.Count)")
+}
+
+$noHunger = @(
+    $modules |
+        Where-Object {
+            $_.name -match 'No Hunger' -or
+            $_.artifact.path -match 'No.?Hunger' -or
+            $_.artifact.url -match 'No.?Hunger'
+        }
+)
+if ($noHunger.Count -gt 0) {
+    $failures.Add("제거 대상 No Hunger 데이터팩이 포함되었습니다: $($noHunger.Count)")
 }
 
 foreach ($module in $modules) {
@@ -125,5 +149,7 @@ if ($failures.Count -gt 0) {
     files = $files.Count
     limitedLegends = $limitedLegends.Count
     clientLocalization = $clientLocalization.Count
+    pastureLoot = $pastureLoot.Count
+    noHunger = $noHunger.Count
     duplicateIds = $duplicateIds.Count
 }

@@ -1585,6 +1585,9 @@ async function checkGameFilesAndLauncher(){
         settingsUpdateVersionValue.innerHTML = server.rawServer.version
         settingsUpdateVersionCheck.style.background = null
         settingsUpdateButtonStatus(Lang.queryJS('settings.updates.gameFilesDoneButton'), false, checkGameFilesAndLauncher)
+        ConfigManager.setGamePackVersion(server.rawServer.id, String(server.rawServer.version))
+        ConfigManager.save()
+        clearGameFilesUpdateUI()
 
         // Keep the executable updater as a second, independent update channel.
         if(!isDev){

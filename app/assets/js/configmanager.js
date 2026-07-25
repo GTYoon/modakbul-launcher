@@ -99,7 +99,8 @@ const DEFAULT_CONFIG = {
     selectedAccount: null,
     authenticationDatabase: {},
     modConfigurations: [],
-    javaConfig: {}
+    javaConfig: {},
+    gamePackVersions: {}
 }
 
 let config = null
@@ -291,6 +292,30 @@ exports.getSelectedServer = function(def = false){
  */
 exports.setSelectedServer = function(serverID){
     config.selectedServer = serverID
+}
+
+/**
+ * Retrieve the game pack version last verified for a server.
+ * A missing value means the launcher has not completed a managed-file check yet.
+ *
+ * @param {string} serverID The server's distribution identifier.
+ * @returns {string|null} The last verified game pack version.
+ */
+exports.getGamePackVersion = function(serverID){
+    return config.gamePackVersions?.[serverID] ?? null
+}
+
+/**
+ * Record a successfully verified game pack version for a server.
+ *
+ * @param {string} serverID The server's distribution identifier.
+ * @param {string} version The verified distribution version.
+ */
+exports.setGamePackVersion = function(serverID, version){
+    if(config.gamePackVersions == null || typeof config.gamePackVersions !== 'object' || Array.isArray(config.gamePackVersions)){
+        config.gamePackVersions = {}
+    }
+    config.gamePackVersions[serverID] = version
 }
 
 /**

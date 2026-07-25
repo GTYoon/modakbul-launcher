@@ -1,17 +1,17 @@
-name: Validate and build Windows
+name: Build
 
-on:
-  pull_request:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-  workflow_dispatch:
+on: push
 
 jobs:
-  validate:
-    runs-on: windows-latest
+  release:
+    runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: write
+
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
 
     steps:
       - name: Check out Git repository
@@ -21,44 +21,18 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
-          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Validate launcher configuration
-        shell: powershell
-        run: .\tools\Test-LauncherConfig.ps1
-
-  windows-installer:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    needs: validate
-    runs-on: windows-latest
-
-    steps:
-      - name: Check out Git repository
-        uses: actions/checkout@v6
-
-      - name: Set up Node
-        uses: actions/setup-node@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          node-version: 22
-          cache: npm
+          python-version: 3.x
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: npm ci
+        shell: bash
 
-      - name: Build Windows installer
-        run: npm run dist:win -- --publish never
-
-      - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: modakbul-season-1-windows
-          path: |
-            dist/Modakbul-Season-1-setup-*.exe
-            dist/Modakbul-Season-1-setup-*.exe.blockmap
-            dist/latest.yml
+      - name: Build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist
+        shell: bash

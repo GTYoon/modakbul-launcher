@@ -1,5 +1,6 @@
 [ejs.landing]
 updateAvailableTooltip = "Update Available"
+updateAvailableAction = "Open updater ›"
 usernamePlaceholder = "Username"
 usernameEditButton = "Edit"
 settingsTooltip = "Settings"
@@ -151,6 +152,10 @@ requiredValue = "* Required"
 [js.login.error.unknown]
 title = "Unknown Error During Login"
 desc = "An unknown error has occurred. Please see the console for details."
+
+[js.landing]
+launcherUpdateAvailable = "Launcher update v{version}"
+gameFilesUpdateAvailable = "Game files update v{version}"
 
 [js.landing.launch]
 pleaseWait = "Please wait.."

@@ -66,6 +66,7 @@ async function showMainUI(data){
 
     await prepareSettings(true)
     updateSelectedServer(data.getServerById(ConfigManager.getSelectedServer()))
+    syncGamePackUpdateNotice(data)
     refreshServerStatus()
     setTimeout(() => {
         document.getElementById('frameBar').style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
@@ -134,10 +135,33 @@ function showFatalStartupError(){
  */
 function onDistroRefresh(data){
     updateSelectedServer(data.getServerById(ConfigManager.getSelectedServer()))
+    syncGamePackUpdateNotice(data)
     refreshServerStatus()
     initNews()
     syncModConfigurations(data)
     ensureJavaSettings(data)
+}
+
+/**
+ * Show an update entry when the selected server's published game-pack version
+ * differs from the last version this launcher successfully verified.
+ *
+ * @param {Object} data The current distribution index.
+ */
+function syncGamePackUpdateNotice(data){
+    const server = data.getServerById(ConfigManager.getSelectedServer())
+    if(server == null || server.rawServer.version == null){
+        clearGameFilesUpdateUI()
+        return
+    }
+
+    const installedVersion = ConfigManager.getGamePackVersion(server.rawServer.id)
+    const remoteVersion = String(server.rawServer.version)
+    if(installedVersion != null && installedVersion !== remoteVersion){
+        showGameFilesUpdateUI({ version: remoteVersion })
+    } else {
+        clearGameFilesUpdateUI()
+    }
 }
 
 /**
@@ -441,6 +465,7 @@ ipcRenderer.on('distributionIndexDone', async (event, res) => {
         const data = await DistroAPI.getDistribution()
         syncModConfigurations(data)
         ensureJavaSettings(data)
+        syncGamePackUpdateNotice(data)
         if(document.readyState === 'interactive' || document.readyState === 'complete'){
             await showMainUI(data)
         } else {

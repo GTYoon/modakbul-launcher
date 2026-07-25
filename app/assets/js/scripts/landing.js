@@ -536,6 +536,9 @@ async function dlAsync(login = true) {
     remote.getCurrentWindow().setProgressBar(-1)
 
     fullRepairModule.destroyReceiver()
+    ConfigManager.setGamePackVersion(serv.rawServer.id, String(serv.rawServer.version))
+    ConfigManager.save()
+    clearGameFilesUpdateUI()
 
     setLaunchDetails(Lang.queryJS('landing.dlAsync.preparingToLaunch'))
 

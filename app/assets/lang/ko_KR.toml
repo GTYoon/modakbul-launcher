@@ -1,5 +1,6 @@
 [ejs.landing]
 updateAvailableTooltip = "업데이트 가능"
+updateAvailableAction = "업데이트 열기 ›"
 usernamePlaceholder = "사용자 이름"
 usernameEditButton = "편집"
 settingsTooltip = "설정"
@@ -151,6 +152,10 @@ requiredValue = "* 필수 입력값"
 [js.login.error.unknown]
 title = "로그인 중 알 수 없는 오류"
 desc = "알 수 없는 오류가 발생했습니다. 자세한 내용은 콘솔을 참조하십시오."
+
+[js.landing]
+launcherUpdateAvailable = "런처 업데이트 v{version}"
+gameFilesUpdateAvailable = "게임 파일 업데이트 v{version}"
 
 [js.landing.launch]
 pleaseWait = "잠시만 기다려주세요.."

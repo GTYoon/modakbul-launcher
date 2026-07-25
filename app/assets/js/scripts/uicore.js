@@ -37,6 +37,10 @@ webFrame.setVisualZoomLevelLimits(1, 1)
 
 // Initialize auto updates in production environments.
 let updateCheckListener
+const pendingUpdates = {
+    launcher: null,
+    gameFiles: null
+}
 if(!isDev){
     ipcRenderer.on('autoUpdateNotification', (event, arg, info) => {
         switch(arg){
@@ -49,9 +53,8 @@ if(!isDev){
                 
                 if(process.platform === 'darwin'){
                     info.darwindownload = `https://github.com/GTYoon/modakbul-launcher/releases/download/v${info.version}/Modakbul-Season-1-setup-${info.version}${process.arch === 'arm64' ? '-arm64' : '-x64'}.dmg`
-                    showUpdateUI(info)
                 }
-                
+                showUpdateUI(info)
                 populateSettingsUpdateInformation(info)
                 break
             case 'update-downloaded':
@@ -104,27 +107,50 @@ function changeAllowPrerelease(val){
     ipcRenderer.send('autoUpdateAction', 'allowPrereleaseChange', val)
 }
 
-function showUpdateUI(info){
-    //TODO Make this message a bit more informative `${info.version}`
-    document.getElementById('image_seal_container').setAttribute('update', true)
-    document.getElementById('image_seal_container').onclick = () => {
-        /*setOverlayContent('Update Available', 'A new update for the launcher is available. Would you like to install now?', 'Install', 'Later')
-        setOverlayHandler(() => {
-            if(!isDev){
-                ipcRenderer.send('autoUpdateAction', 'installUpdateNow')
-            } else {
-                console.error('Cannot install updates in development environment.')
-                toggleOverlay(false)
-            }
-        })
-        setDismissHandler(() => {
-            toggleOverlay(false)
-        })
-        toggleOverlay(true, true)*/
-        switchView(getCurrentView(), VIEWS.settings, 500, 500, () => {
-            settingsNavItemListener(document.getElementById('settingsNavUpdate'), false)
-        })
+function openUpdateTab(){
+    const showTab = () => settingsNavItemListener(document.getElementById('settingsNavUpdate'), false)
+    if(getCurrentView() === VIEWS.settings){
+        showTab()
+        return
     }
+    switchView(getCurrentView(), VIEWS.settings, 500, 500, showTab)
+}
+
+function refreshUpdateNavigation(){
+    const update = pendingUpdates.launcher ?? pendingUpdates.gameFiles
+    const seal = document.getElementById('image_seal_container')
+    const button = document.getElementById('landingUpdateButton')
+    const title = document.getElementById('landingUpdateButtonTitle')
+
+    if(update == null){
+        seal.removeAttribute('update')
+        seal.onclick = null
+        button.style.display = 'none'
+        return
+    }
+
+    seal.setAttribute('update', true)
+    seal.onclick = openUpdateTab
+    button.style.display = 'block'
+    button.onclick = openUpdateTab
+    title.textContent = update.type === 'launcher'
+        ? Lang.queryJS('landing.launcherUpdateAvailable', { version: update.version })
+        : Lang.queryJS('landing.gameFilesUpdateAvailable', { version: update.version })
+}
+
+function showUpdateUI(info){
+    pendingUpdates.launcher = { type: 'launcher', version: info.version }
+    refreshUpdateNavigation()
+}
+
+function showGameFilesUpdateUI(info){
+    pendingUpdates.gameFiles = { type: 'gameFiles', version: info.version }
+    refreshUpdateNavigation()
+}
+
+function clearGameFilesUpdateUI(){
+    pendingUpdates.gameFiles = null
+    refreshUpdateNavigation()
 }
 
 /* jQuery Example

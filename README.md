@@ -2,7 +2,7 @@
 
 Minecraft 1.21.1 Fabric 기반 `모닥불 Season 1` 서버용 독립 런처 작업본입니다.
 
-이 프로젝트는 공유받은 `hulonge-setup-1.0.0.exe`의 실제 사용 흐름과 한글화를 참고하고, 최신 [Helios Launcher](https://github.com/dscalzi/HeliosLauncher) MIT 소스를 기반으로 다시 구성했습니다. 기존 GitHub 배포 주소와 서버 주소는 모닥불 전용 값으로 교체했고, Microsoft 애플리케이션 ID는 운영자 요청에 따라 기존 등록값을 사용합니다.
+이 프로젝트는 공유받은 `hulonge-setup-1.0.0.exe`의 실제 사용 흐름과 한글화를 참고하고, 최신 [Helios Launcher](https://github.com/dscalzi/HeliosLauncher) MIT 소스를 기반으로 다시 구성했습니다. 휴롱 런처의 GitHub 저장소, Microsoft 애플리케이션 ID, 서버 주소는 재사용하지 않습니다.
 
 ## 목표
 
@@ -14,14 +14,14 @@ Minecraft 1.21.1 Fabric 기반 `모닥불 Season 1` 서버용 독립 런처 작�
 - 런처와 클라이언트 파일의 자동 업데이트
 - 기본 한국어 UI
 
-## 연결된 운영 값
+## 아직 연결해야 하는 값
 
-GitHub 소유자는 `GTYoon`이며 다음 저장소를 사용합니다.
+GitHub 소유자는 `GTYoon`으로 확정했고 다음 저장소 이름을 사용합니다.
 
 - 런처 소스·설치기: `GTYoon/modakbul-launcher`
 - 클라이언트 배포 파일: `GTYoon/modakbul-client`
 
-Microsoft Entra Client ID, 클라이언트 배포 URL, 서버 주소가 모두 적용되어 있습니다.
+프로덕션 빌드 전 남은 필수 값은 Microsoft Entra 애플리케이션의 Client ID입니다.
 
 설정 검증:
 
