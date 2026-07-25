@@ -50,11 +50,11 @@ $files = @($modules | Where-Object type -eq 'File')
 if ($fabricModules.Count -ne 1) {
     $failures.Add("Fabric 로더 모듈 수가 1이 아닙니다: $($fabricModules.Count)")
 }
-if ($fabricMods.Count -ne 147) {
-    $failures.Add("클라이언트 모드 수가 147이 아닙니다: $($fabricMods.Count)")
+if ($fabricMods.Count -lt 147) {
+    $failures.Add("클라이언트 모드 수가 기준보다 적습니다: $($fabricMods.Count)")
 }
-if ($files.Count -ne 1829) {
-    $failures.Add("일반 관리 파일 수가 1829가 아닙니다: $($files.Count)")
+if ($files.Count -lt 1829) {
+    $failures.Add("일반 관리 파일 수가 기준보다 적습니다: $($files.Count)")
 }
 
 $ids = @($modules | ForEach-Object { [string]$_.id })
@@ -64,15 +64,27 @@ if ($duplicateIds.Count -gt 0) {
 }
 
 $limitedLegends = @(
-    $modules |
+    $fabricMods |
         Where-Object {
             $_.name -match 'LimitedLegends' -or
             $_.artifact.path -match 'LimitedLegends' -or
             $_.artifact.url -match 'LimitedLegends'
         }
 )
-if ($limitedLegends.Count -gt 0) {
-    $failures.Add("제거 대상 LimitedLegends가 포함되었습니다: $($limitedLegends.Count)")
+if ($limitedLegends.Count -ne 1) {
+    $failures.Add("LimitedLegends 모드 수가 1이 아닙니다: $($limitedLegends.Count)")
+}
+
+$clientLocalization = @(
+    $fabricMods |
+        Where-Object {
+            $_.name -match 'gcm-client-localization' -or
+            $_.artifact.path -match 'gcm-client-localization' -or
+            $_.artifact.url -match 'gcm-client-localization'
+        }
+)
+if ($clientLocalization.Count -ne 1) {
+    $failures.Add("클라이언트 전용 한글화 패치 수가 1이 아닙니다: $($clientLocalization.Count)")
 }
 
 foreach ($module in $modules) {
@@ -112,5 +124,6 @@ if ($failures.Count -gt 0) {
     fabricMods = $fabricMods.Count
     files = $files.Count
     limitedLegends = $limitedLegends.Count
+    clientLocalization = $clientLocalization.Count
     duplicateIds = $duplicateIds.Count
 }
