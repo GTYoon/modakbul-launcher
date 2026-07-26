@@ -365,9 +365,13 @@
                         <div id="settingsUpdateVersionCheck">&#10003;</div>
                         <div id="settingsUpdateVersionDetails">
                             <span id="settingsUpdateVersionTitle"><%- lang('settings.stableRelease') %></span>
-                            <div id="settingsUpdateVersionLine">
-                                <span id="settingsUpdateVersionText"><%- lang('settings.versionText') %> </span>
-                                <span id="settingsUpdateVersionValue">0.0.1-alpha.18</span>
+                            <div class="settingsUpdateVersionLine">
+                                <span class="settingsUpdateVersionChannel"><%- lang('settings.launcherVersionChannel') %></span>
+                                <span id="settingsLauncherVersionValue">0.0.0</span>
+                            </div>
+                            <div class="settingsUpdateVersionLine">
+                                <span class="settingsUpdateVersionChannel"><%- lang('settings.gamePackVersionChannel') %></span>
+                                <span id="settingsGamePackVersionValue"><%- lang('settings.versionChecking') %></span>
                             </div>
                         </div>
                     </div>

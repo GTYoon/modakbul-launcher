@@ -3,6 +3,8 @@
  */
 // Requirements
 const { URL }                 = require('url')
+const fsLaunch                = require('fs-extra')
+const pathLaunch              = require('path')
 const {
     MojangRestAPI,
     getServerStatus
@@ -41,6 +43,46 @@ const server_selection_button = document.getElementById('server_selection_button
 const user_text               = document.getElementById('user_text')
 
 const loggerLanding = LoggerUtil.getLogger('Landing')
+const launcherLogDirectory = pathLaunch.join(ConfigManager.getLauncherDirectory(), 'logs')
+const launcherLogPath = pathLaunch.join(launcherLogDirectory, 'launcher.log')
+
+function appendLaunchLog(level, message, error = null){
+    try {
+        fsLaunch.ensureDirSync(launcherLogDirectory)
+        const errorDetails = error == null
+            ? ''
+            : `\n${error.stack || error.message || String(error)}`
+        fsLaunch.appendFileSync(
+            launcherLogPath,
+            `[${new Date().toISOString()}] [${level}] ${String(message)}${errorDetails}\n`,
+            'utf8'
+        )
+    } catch(logError) {
+        loggerLanding.warn('Unable to write launcher log.', logError)
+    }
+}
+
+function beginLaunchLog(){
+    try {
+        fsLaunch.ensureDirSync(launcherLogDirectory)
+        fsLaunch.writeFileSync(
+            launcherLogPath,
+            `[${new Date().toISOString()}] Launcher v${remote.app.getVersion()} launch requested\n`,
+            'utf8'
+        )
+    } catch(err) {
+        loggerLanding.warn('Unable to initialize launcher log.', err)
+    }
+}
+
+function escapeHTML(value){
+    return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll('\'', '&#039;')
+}
 
 /* Launch Progress Wrapper Functions */
 
@@ -101,8 +143,18 @@ function setLaunchEnabled(val){
 // Bind launch button
 document.getElementById('launch_button').addEventListener('click', async e => {
     loggerLanding.info('Launching game..')
+    if(ConfigManager.getSelectedAccount() == null){
+        showLoginRequired()
+        return
+    }
+
+    beginLaunchLog()
     try {
         const server = (await DistroAPI.getDistribution()).getServerById(ConfigManager.getSelectedServer())
+        if(server == null){
+            throw new Error('Selected server is unavailable.')
+        }
+        appendLaunchLog('INFO', `Selected server ${server.rawServer.id} v${server.rawServer.version}`)
         const jExe = ConfigManager.getJavaExecutable(ConfigManager.getSelectedServer())
         if(jExe == null){
             await asyncSystemScan(server.effectiveJavaOptions)
@@ -123,7 +175,11 @@ document.getElementById('launch_button').addEventListener('click', async e => {
         }
     } catch(err) {
         loggerLanding.error('Unhandled error in during launch process.', err)
-        showLaunchFailure(Lang.queryJS('landing.launch.failureTitle'), Lang.queryJS('landing.launch.failureText'))
+        showLaunchFailure(
+            Lang.queryJS('landing.launch.failureTitle'),
+            err.message || Lang.queryJS('landing.launch.failureText'),
+            err
+        )
     }
 })
 
@@ -279,15 +335,47 @@ let serverStatusListener = setInterval(() => refreshServerStatus(true), 300000)
  * 
  * @param {string} title The overlay title.
  * @param {string} desc The overlay description.
+ * @param {Error|null} error Optional original error.
+ * @param {string} logPath Optional diagnostic log to reveal.
  */
-function showLaunchFailure(title, desc){
+function showLaunchFailure(title, desc, error = null, logPath = launcherLogPath){
+    appendLaunchLog('ERROR', `${title}: ${desc}`, error)
     setOverlayContent(
         title,
-        desc,
-        Lang.queryJS('landing.launch.okay')
+        `${desc}<br><br>${Lang.queryJS('landing.launch.logSaved')}`,
+        Lang.queryJS('landing.launch.openLog'),
+        Lang.queryJS('overlay.dismiss')
     )
-    setOverlayHandler(null)
-    toggleOverlay(true)
+    setOverlayHandler(() => {
+        toggleOverlay(false)
+        if(fsLaunch.existsSync(logPath)){
+            shell.showItemInFolder(logPath)
+        } else {
+            shell.openPath(launcherLogDirectory)
+        }
+    })
+    setDismissHandler(null)
+    toggleOverlay(true, true)
+    toggleLaunchArea(false)
+}
+
+function showLoginRequired(){
+    setOverlayContent(
+        Lang.queryJS('landing.launch.loginRequiredTitle'),
+        Lang.queryJS('landing.launch.loginRequiredText'),
+        Lang.queryJS('landing.launch.loginNow'),
+        Lang.queryJS('overlay.dismiss')
+    )
+    setOverlayHandler(() => {
+        toggleOverlay(false)
+        loginOptionsCancelEnabled(true)
+        loginOptionsViewOnLoginSuccess = VIEWS.landing
+        loginOptionsViewOnLoginCancel = VIEWS.loginOptions
+        loginOptionsViewOnCancel = VIEWS.landing
+        switchView(getCurrentView(), VIEWS.loginOptions)
+    })
+    setDismissHandler(null)
+    toggleOverlay(true, true)
     toggleLaunchArea(false)
 }
 
@@ -326,7 +414,11 @@ async function asyncSystemScan(effectiveJavaOptions, launchAfter = true){
                 downloadJava(effectiveJavaOptions, launchAfter)
             } catch(err) {
                 loggerLanding.error('Unhandled error in Java Download', err)
-                showLaunchFailure(Lang.queryJS('landing.systemScan.javaDownloadFailureTitle'), Lang.queryJS('landing.systemScan.javaDownloadFailureText'))
+                showLaunchFailure(
+                    Lang.queryJS('landing.systemScan.javaDownloadFailureTitle'),
+                    err.message || Lang.queryJS('landing.systemScan.javaDownloadFailureText'),
+                    err
+                )
             }
         })
         setDismissHandler(() => {
@@ -461,7 +553,11 @@ async function dlAsync(login = true) {
         onDistroRefresh(distro)
     } catch(err) {
         loggerLaunchSuite.error('Unable to refresh distribution index.', err)
-        showLaunchFailure(Lang.queryJS('landing.dlAsync.fatalError'), Lang.queryJS('landing.dlAsync.unableToLoadDistributionIndex'))
+        showLaunchFailure(
+            Lang.queryJS('landing.dlAsync.fatalError'),
+            Lang.queryJS('landing.dlAsync.unableToLoadDistributionIndex'),
+            err
+        )
         return
     }
 
@@ -470,6 +566,7 @@ async function dlAsync(login = true) {
     if(login) {
         if(ConfigManager.getSelectedAccount() == null){
             loggerLanding.error('You must be logged into an account.')
+            showLoginRequired()
             return
         }
     }
@@ -490,12 +587,19 @@ async function dlAsync(login = true) {
 
     fullRepairModule.childProcess.on('error', (err) => {
         loggerLaunchSuite.error('Error during launch', err)
-        showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'), err.message || Lang.queryJS('landing.dlAsync.errorDuringLaunchText'))
+        showLaunchFailure(
+            Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
+            err.message || Lang.queryJS('landing.dlAsync.errorDuringLaunchText'),
+            err
+        )
     })
     fullRepairModule.childProcess.on('close', (code, _signal) => {
         if(code !== 0){
             loggerLaunchSuite.error(`Full Repair Module exited with code ${code}, assuming error.`)
-            showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'), Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
+            showLaunchFailure(
+                Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
+                Lang.queryJS('landing.dlAsync.gameFileWorkerExited', { code })
+            )
         }
     })
 
@@ -509,7 +613,11 @@ async function dlAsync(login = true) {
         setLaunchPercentage(100)
     } catch (err) {
         loggerLaunchSuite.error('Error during file validation.')
-        showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringFileVerificationTitle'), err.displayable || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
+        showLaunchFailure(
+            Lang.queryJS('landing.dlAsync.errorDuringFileVerificationTitle'),
+            err.displayable || err.message || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'),
+            err
+        )
         return
     }
     
@@ -525,7 +633,11 @@ async function dlAsync(login = true) {
             setDownloadPercentage(100)
         } catch(err) {
             loggerLaunchSuite.error('Error during file download.')
-            showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringFileDownloadTitle'), err.displayable || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'))
+            showLaunchFailure(
+                Lang.queryJS('landing.dlAsync.errorDuringFileDownloadTitle'),
+                err.displayable || err.message || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'),
+                err
+            )
             return
         }
     } else {
@@ -563,14 +675,26 @@ async function dlAsync(login = true) {
         // const SERVER_JOINED_REGEX = /\[.+\]: \[CHAT\] [a-zA-Z0-9_]{1,16} joined the game/
         const SERVER_JOINED_REGEX = new RegExp(`\\[.+\\]: \\[CHAT\\] ${authUser.displayName} joined the game`)
 
+        let launchAreaClosed = false
+        let processFailureShown = false
+        let launchedProcess = null
+
         const onLoadComplete = () => {
-            toggleLaunchArea(false)
-            if(hasRPC){
-                DiscordWrapper.updateDetails(Lang.queryJS('landing.discord.loading'))
-                proc.stdout.on('data', gameStateChange)
+            if(launchAreaClosed){
+                return
             }
-            proc.stdout.removeListener('data', tempListener)
-            proc.stderr.removeListener('data', gameErrorListener)
+            launchAreaClosed = true
+            toggleLaunchArea(false)
+            if(hasRPC && launchedProcess?.stdout != null){
+                DiscordWrapper.updateDetails(Lang.queryJS('landing.discord.loading'))
+                launchedProcess.stdout.on('data', gameStateChange)
+            }
+            if(launchedProcess?.stdout != null){
+                launchedProcess.stdout.removeListener('data', tempListener)
+            }
+            if(launchedProcess?.stderr != null){
+                launchedProcess.stderr.removeListener('data', gameErrorListener)
+            }
         }
         const start = Date.now()
 
@@ -603,36 +727,81 @@ async function dlAsync(login = true) {
             data = data.trim()
             if(data.indexOf('Could not find or load main class net.minecraft.launchwrapper.Launch') > -1){
                 loggerLaunchSuite.error('Game launch failed, LaunchWrapper was not downloaded properly.')
-                showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'), Lang.queryJS('landing.dlAsync.launchWrapperNotDownloaded'))
+                processFailureShown = true
+                showLaunchFailure(
+                    Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
+                    Lang.queryJS('landing.dlAsync.launchWrapperNotDownloaded'),
+                    null,
+                    launchedProcess?.launchLogPath || launcherLogPath
+                )
             }
         }
 
         try {
             // Build Minecraft process.
-            proc = pb.build()
+            launchedProcess = pb.build()
+            proc = launchedProcess
 
             // Bind listeners to stdout.
-            proc.stdout.on('data', tempListener)
-            proc.stderr.on('data', gameErrorListener)
+            launchedProcess.stdout.on('data', tempListener)
+            launchedProcess.stderr.on('data', gameErrorListener)
 
-            setLaunchDetails(Lang.queryJS('landing.dlAsync.doneEnjoyServer'))
+            launchedProcess.once('spawn', () => {
+                setLaunchDetails(Lang.queryJS('landing.dlAsync.doneEnjoyServer'))
+                setTimeout(() => {
+                    if(launchedProcess.exitCode == null && !launchedProcess.killed){
+                        onLoadComplete()
+                    }
+                }, MIN_LINGER)
+            })
+
+            launchedProcess.once('error', err => {
+                if(processFailureShown){
+                    return
+                }
+                processFailureShown = true
+                showLaunchFailure(
+                    Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
+                    Lang.queryJS('landing.launch.processStartFailed', { error: escapeHTML(err.message || err.code || err) }),
+                    err,
+                    launchedProcess.launchLogPath || launcherLogPath
+                )
+            })
+
+            launchedProcess.once('close', (code, signal) => {
+                if(!launchAreaClosed && !processFailureShown){
+                    processFailureShown = true
+                    showLaunchFailure(
+                        Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
+                        Lang.queryJS('landing.launch.processExited', { code: code ?? signal ?? 'unknown' }),
+                        null,
+                        launchedProcess.launchLogPath || launcherLogPath
+                    )
+                }
+            })
 
             // Init Discord Hook
             if(distro.rawDistribution.discord != null && serv.rawServer.discord != null){
                 DiscordWrapper.initRPC(distro.rawDistribution.discord, serv.rawServer.discord)
                 hasRPC = true
-                proc.on('close', (code, signal) => {
+                launchedProcess.on('close', (code, signal) => {
                     loggerLaunchSuite.info('Shutting down Discord Rich Presence..')
                     DiscordWrapper.shutdownRPC()
                     hasRPC = false
-                    proc = null
+                    if(proc === launchedProcess){
+                        proc = null
+                    }
                 })
             }
 
         } catch(err) {
 
             loggerLaunchSuite.error('Error during launch', err)
-            showLaunchFailure(Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'), Lang.queryJS('landing.dlAsync.checkConsoleForDetails'))
+            showLaunchFailure(
+                Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
+                err.message || Lang.queryJS('landing.dlAsync.checkConsoleForDetails'),
+                err
+            )
 
         }
     }

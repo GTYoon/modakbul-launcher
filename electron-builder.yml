@@ -27,10 +27,14 @@ nsis:
   oneClick: false
   perMachine: false
   allowElevation: true
-  allowToChangeInstallationDirectory: true
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: '모닥불 Season 1'
 
 # macOS Configuration
 mac:
+  icon: 'build/icon-mac.png'
   target:
     - target: 'dmg'
       arch:

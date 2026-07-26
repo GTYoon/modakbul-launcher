@@ -2388,6 +2388,10 @@ input:checked + .toggleSwitchSlider:before {
 
 /* Update version details container. */
 #settingsUpdateVersionDetails {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 2px;
     margin-left: 10px;
 }
 
@@ -2400,10 +2404,17 @@ input:checked + .toggleSwitchSlider:before {
 }
 
 /* Current version text. */
-#settingsUpdateVersionLine {
+.settingsUpdateVersionLine {
+    display: flex;
+    gap: 7px;
     font-size: 10px;
     color: grey;
     font-weight: bold;
+}
+
+.settingsUpdateVersionChannel {
+    color: #d7d7d7;
+    min-width: 82px;
 }
 
 /* Update action container. */
