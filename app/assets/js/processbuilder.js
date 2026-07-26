@@ -31,6 +31,7 @@ class ProcessBuilder {
         this.modManifest = modManifest
         this.authUser = authUser
         this.launcherVersion = launcherVersion
+        this.launchLogPath = path.join(ConfigManager.getLauncherDirectory(), 'logs', 'minecraft-launch.log')
         this.forgeModListFile = path.join(this.gameDir, 'forgeMods.list') // 1.13+
         this.fmlDir = path.join(this.gameDir, 'forgeModList.json')
         this.llDir = path.join(this.gameDir, 'liteloaderModList.json')
@@ -72,31 +73,64 @@ class ProcessBuilder {
         }
 
         // Hide access token
-        const loggableArgs = [...args]
-        loggableArgs[loggableArgs.findIndex(x => x === this.authUser.accessToken)] = '**********'
+        const loggableArgs = args.map(value => value === this.authUser.accessToken ? '**********' : value)
 
         logger.info('Launch Arguments:', loggableArgs)
 
+        fs.ensureDirSync(path.dirname(this.launchLogPath))
+        fs.writeFileSync(
+            this.launchLogPath,
+            [
+                `[${new Date().toISOString()}] Minecraft launch requested`,
+                `Launcher version: ${this.launcherVersion}`,
+                `Server pack: ${this.server.rawServer.id} v${this.server.rawServer.version}`,
+                `Java: ${ConfigManager.getJavaExecutable(this.server.rawServer.id)}`,
+                `Game directory: ${this.gameDir}`,
+                `Arguments: ${JSON.stringify(loggableArgs)}`,
+                ''
+            ].join(os.EOL),
+            'utf8'
+        )
+
+        const appendLaunchLog = (channel, value) => {
+            const message = value instanceof Error
+                ? `${value.stack || value.message || String(value)}`
+                : String(value)
+            fs.appendFileSync(
+                this.launchLogPath,
+                `[${new Date().toISOString()}] [${channel}] ${message.trim()}${os.EOL}`,
+                'utf8'
+            )
+        }
+
         const child = child_process.spawn(ConfigManager.getJavaExecutable(this.server.rawServer.id), args, {
             cwd: this.gameDir,
-            detached: ConfigManager.getLaunchDetached()
+            detached: ConfigManager.getLaunchDetached(),
+            stdio: ['ignore', 'pipe', 'pipe']
         })
-
-        if(ConfigManager.getLaunchDetached()){
-            child.unref()
-        }
+        child.launchLogPath = this.launchLogPath
 
         child.stdout.setEncoding('utf8')
         child.stderr.setEncoding('utf8')
 
         child.stdout.on('data', (data) => {
+            appendLaunchLog('STDOUT', data)
             data.trim().split('\n').forEach(x => console.log(`\x1b[32m[Minecraft]\x1b[0m ${x}`))
             
         })
         child.stderr.on('data', (data) => {
+            appendLaunchLog('STDERR', data)
             data.trim().split('\n').forEach(x => console.log(`\x1b[31m[Minecraft]\x1b[0m ${x}`))
         })
+        child.on('spawn', () => {
+            appendLaunchLog('PROCESS', `Started with PID ${child.pid}`)
+        })
+        child.on('error', (err) => {
+            appendLaunchLog('PROCESS ERROR', err)
+            logger.error('Unable to start Minecraft process.', err)
+        })
         child.on('close', (code) => {
+            appendLaunchLog('PROCESS', `Exited with code ${code}`)
             logger.info('Exited with code', code)
             fs.remove(tempNativePath, (err) => {
                 if(err){
@@ -106,6 +140,10 @@ class ProcessBuilder {
                 }
             })
         })
+
+        if(ConfigManager.getLaunchDetached()){
+            child.unref()
+        }
 
         return child
     }

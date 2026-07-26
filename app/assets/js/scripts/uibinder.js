@@ -157,7 +157,7 @@ function syncGamePackUpdateNotice(data){
 
     const installedVersion = ConfigManager.getGamePackVersion(server.rawServer.id)
     const remoteVersion = String(server.rawServer.version)
-    if(installedVersion != null && installedVersion !== remoteVersion){
+    if(installedVersion !== remoteVersion){
         showGameFilesUpdateUI({ version: remoteVersion })
     } else {
         clearGameFilesUpdateUI()

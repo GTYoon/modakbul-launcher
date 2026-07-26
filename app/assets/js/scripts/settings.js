@@ -1494,7 +1494,8 @@ const settingsTabUpdate            = document.getElementById('settingsTabUpdate'
 const settingsUpdateTitle          = document.getElementById('settingsUpdateTitle')
 const settingsUpdateVersionCheck   = document.getElementById('settingsUpdateVersionCheck')
 const settingsUpdateVersionTitle   = document.getElementById('settingsUpdateVersionTitle')
-const settingsUpdateVersionValue   = document.getElementById('settingsUpdateVersionValue')
+const settingsLauncherVersionValue = document.getElementById('settingsLauncherVersionValue')
+const settingsGamePackVersionValue = document.getElementById('settingsGamePackVersionValue')
 const settingsUpdateChangelogTitle = settingsTabUpdate.getElementsByClassName('settingsChangelogTitle')[0]
 const settingsUpdateChangelogText  = settingsTabUpdate.getElementsByClassName('settingsChangelogText')[0]
 const settingsUpdateChangelogCont  = settingsTabUpdate.getElementsByClassName('settingsChangelogContainer')[0]
@@ -1581,12 +1582,10 @@ async function checkGameFilesAndLauncher(){
             })
         }
 
-        settingsUpdateVersionTitle.innerHTML = Lang.queryJS('settings.updates.gamePackVersionTitle')
-        settingsUpdateVersionValue.innerHTML = server.rawServer.version
-        settingsUpdateVersionCheck.style.background = null
-        settingsUpdateButtonStatus(Lang.queryJS('settings.updates.gameFilesDoneButton'), false, checkGameFilesAndLauncher)
         ConfigManager.setGamePackVersion(server.rawServer.id, String(server.rawServer.version))
         ConfigManager.save()
+        populateGamePackVersionInformation(server)
+        settingsUpdateButtonStatus(Lang.queryJS('settings.updates.gameFilesDoneButton'), false, checkGameFilesAndLauncher)
         clearGameFilesUpdateUI()
 
         // Keep the executable updater as a second, independent update channel.
@@ -1596,6 +1595,7 @@ async function checkGameFilesAndLauncher(){
     } catch(err) {
         settingsUpdateLogger.error('Unable to update managed game files.', err)
         settingsUpdateTitle.innerHTML = Lang.queryJS('settings.updates.gameFilesFailedTitle')
+        settingsGamePackVersionValue.innerHTML = Lang.queryJS('settings.updates.gamePackVersionUnavailable')
         settingsUpdateButtonStatus(Lang.queryJS('settings.updates.gameFilesRetryButton'), false, checkGameFilesAndLauncher)
     } finally {
         if(fullRepairModule != null){
@@ -1610,6 +1610,28 @@ async function checkGameFilesAndLauncher(){
 }
 
 /**
+ * Display the published and last verified client-pack versions separately
+ * from the launcher executable version.
+ *
+ * @param {Object} server The selected Helios distribution server.
+ */
+function populateGamePackVersionInformation(server){
+    if(server == null || server.rawServer.version == null){
+        settingsGamePackVersionValue.innerHTML = Lang.queryJS('settings.updates.gamePackVersionUnavailable')
+        return
+    }
+
+    const remoteVersion = String(server.rawServer.version)
+    const installedVersion = ConfigManager.getGamePackVersion(server.rawServer.id)
+    settingsGamePackVersionValue.innerHTML = installedVersion == null
+        ? Lang.queryJS('settings.updates.gamePackVersionUnverified', { remote: remoteVersion })
+        : Lang.queryJS('settings.updates.gamePackVersionVerified', {
+            remote: remoteVersion,
+            installed: installedVersion
+        })
+}
+
+/**
  * Populate the update tab with relevant information.
  * 
  * @param {Object} data The update data.
@@ -1620,7 +1642,7 @@ function populateSettingsUpdateInformation(data){
         settingsUpdateChangelogCont.style.display = null
         settingsUpdateChangelogTitle.innerHTML = data.releaseName
         settingsUpdateChangelogText.innerHTML = data.releaseNotes
-        populateVersionInformation(data.version, settingsUpdateVersionValue, settingsUpdateVersionTitle, settingsUpdateVersionCheck)
+        populateVersionInformation(data.version, settingsLauncherVersionValue, settingsUpdateVersionTitle, settingsUpdateVersionCheck)
         
         if(process.platform === 'darwin'){
             settingsUpdateButtonStatus(Lang.queryJS('settings.updates.downloadButton'), false, () => {
@@ -1632,7 +1654,7 @@ function populateSettingsUpdateInformation(data){
     } else {
         settingsUpdateTitle.innerHTML = Lang.queryJS('settings.updates.latestVersionTitle')
         settingsUpdateChangelogCont.style.display = 'none'
-        populateVersionInformation(remote.app.getVersion(), settingsUpdateVersionValue, settingsUpdateVersionTitle, settingsUpdateVersionCheck)
+        populateVersionInformation(remote.app.getVersion(), settingsLauncherVersionValue, settingsUpdateVersionTitle, settingsUpdateVersionCheck)
         settingsUpdateButtonStatus(
             Lang.queryJS('settings.updates.checkForUpdatesButton'),
             false,
@@ -1646,8 +1668,15 @@ function populateSettingsUpdateInformation(data){
  * 
  * @param {Object} data The update data.
  */
-function prepareUpdateTab(data = null){
+async function prepareUpdateTab(data = null){
     populateSettingsUpdateInformation(data)
+    try {
+        const distro = await DistroAPI.refreshDistributionOrFallback()
+        populateGamePackVersionInformation(distro.getServerById(ConfigManager.getSelectedServer()))
+    } catch(err) {
+        settingsUpdateLogger.warn('Unable to load client-pack version information.', err)
+        settingsGamePackVersionValue.innerHTML = Lang.queryJS('settings.updates.gamePackVersionUnavailable')
+    }
 }
 
 /**
@@ -1663,7 +1692,7 @@ async function prepareSettings(first = false) {
     if(first){
         setupSettingsTabs()
         initSettingsValidators()
-        prepareUpdateTab()
+        await prepareUpdateTab()
     } else {
         await prepareModsTab()
     }

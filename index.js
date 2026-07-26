@@ -5,6 +5,7 @@ remoteMain.initialize()
 const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron')
 const autoUpdater                       = require('electron-updater').autoUpdater
 const ejse                              = require('ejs-electron')
+const fs                                = require('fs')
 const isDev                             = require('./app/assets/js/isdev')
 const path                              = require('path')
 const semver                            = require('semver')
@@ -325,8 +326,40 @@ function getPlatformIcon(filename){
     return path.join(__dirname, 'app', 'assets', 'images', `${filename}.png`)
 }
 
+/**
+ * Keep the public desktop shortcut pointed at the executable which is
+ * currently running. This repairs shortcuts left behind by old unpacked
+ * copies or a previous Program Files installation after an NSIS update.
+ */
+function repairWindowsDesktopShortcut(){
+    if(process.platform !== 'win32' || !app.isPackaged){
+        return
+    }
+
+    const shortcutPath = path.join(app.getPath('desktop'), '모닥불 Season 1.lnk')
+    const shortcutDetails = {
+        target: process.execPath,
+        cwd: path.dirname(process.execPath),
+        icon: process.execPath,
+        iconIndex: 0,
+        description: `모닥불 Season 1 런처 v${app.getVersion()}`,
+        appUserModelId: 'kr.modakbul.season1.launcher'
+    }
+
+    try {
+        const operation = fs.existsSync(shortcutPath) ? 'replace' : 'create'
+        if(!shell.writeShortcutLink(shortcutPath, operation, shortcutDetails)){
+            console.warn(`Unable to repair desktop shortcut at ${shortcutPath}`)
+        }
+    } catch(err) {
+        // A shortcut failure must never prevent the launcher from opening.
+        console.warn('Unable to repair the Modakbul desktop shortcut.', err)
+    }
+}
+
 app.on('ready', createWindow)
 app.on('ready', createMenu)
+app.on('ready', repairWindowsDesktopShortcut)
 
 app.on('window-all-closed', () => {
     // On macOS it is common for applications and their menu bar
