@@ -3467,6 +3467,10 @@ input:checked + .toggleSwitchSlider:before {
     cursor: default;
     pointer-events: none;
 }
+#launch_button[aria-disabled="true"]:not(:disabled) {
+    color: #c7c7c7;
+    cursor: pointer;
+}
 
 /* Launch details main container, hidden until launch processing begins. */
 #launch_details {

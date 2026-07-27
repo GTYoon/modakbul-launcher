@@ -53,7 +53,8 @@ class ProcessBuilder {
         logger.info('Using liteloader:', this.usingLiteLoader)
         this.usingFabricLoader = this.server.modules.some(mdl => mdl.rawModule.type === Type.Fabric)
         logger.info('Using fabric loader:', this.usingFabricLoader)
-        const modObj = this.resolveModConfiguration(ConfigManager.getModConfiguration(this.server.rawServer.id).mods, this.server.modules)
+        const modConfiguration = ConfigManager.getModConfiguration(this.server.rawServer.id)
+        const modObj = this.resolveModConfiguration(modConfiguration?.mods || {}, this.server.modules)
         
         // Mod list below 1.13
         // Fabric only supports 1.14+
@@ -92,22 +93,43 @@ class ProcessBuilder {
             'utf8'
         )
 
+        const launchLogStream = fs.createWriteStream(this.launchLogPath, {
+            flags: 'a',
+            encoding: 'utf8'
+        })
+        let launchLogWritable = true
+        launchLogStream.on('error', err => {
+            launchLogWritable = false
+            logger.warn('Unable to append to the Minecraft launch log.', err)
+        })
+
         const appendLaunchLog = (channel, value) => {
             const message = value instanceof Error
                 ? `${value.stack || value.message || String(value)}`
                 : String(value)
-            fs.appendFileSync(
-                this.launchLogPath,
-                `[${new Date().toISOString()}] [${channel}] ${message.trim()}${os.EOL}`,
-                'utf8'
-            )
+            if(!launchLogWritable || launchLogStream.destroyed){
+                return
+            }
+            try {
+                launchLogStream.write(`[${new Date().toISOString()}] [${channel}] ${message.trim()}${os.EOL}`)
+            } catch(err) {
+                launchLogWritable = false
+                logger.warn('Unable to append to the Minecraft launch log.', err)
+            }
         }
 
-        const child = child_process.spawn(ConfigManager.getJavaExecutable(this.server.rawServer.id), args, {
-            cwd: this.gameDir,
-            detached: ConfigManager.getLaunchDetached(),
-            stdio: ['ignore', 'pipe', 'pipe']
-        })
+        let child
+        try {
+            child = child_process.spawn(ConfigManager.getJavaExecutable(this.server.rawServer.id), args, {
+                cwd: this.gameDir,
+                detached: ConfigManager.getLaunchDetached(),
+                stdio: ['ignore', 'pipe', 'pipe']
+            })
+        } catch(err) {
+            appendLaunchLog('PROCESS ERROR', err)
+            launchLogStream.end()
+            throw err
+        }
         child.launchLogPath = this.launchLogPath
 
         child.stdout.setEncoding('utf8')
@@ -131,6 +153,7 @@ class ProcessBuilder {
         })
         child.on('close', (code) => {
             appendLaunchLog('PROCESS', `Exited with code ${code}`)
+            launchLogStream.end()
             logger.info('Exited with code', code)
             fs.remove(tempNativePath, (err) => {
                 if(err){
@@ -442,7 +465,10 @@ class ProcessBuilder {
         const argDiscovery = /\${*(.*)}/
 
         // JVM Arguments First
-        let args = this.vanillaManifest.arguments.jvm
+        // Argument construction appends and rewrites entries. Clone the
+        // manifest array so a second PLAY does not inherit arguments from the
+        // previous launch attempt.
+        let args = JSON.parse(JSON.stringify(this.vanillaManifest.arguments.jvm || []))
 
         // Debug securejarhandler
         // args.push('-Dbsl.debug=true')
@@ -472,7 +498,7 @@ class ProcessBuilder {
         args.push(this.modManifest.mainClass)
 
         // Vanilla Arguments
-        args = args.concat(this.vanillaManifest.arguments.game)
+        args = args.concat(JSON.parse(JSON.stringify(this.vanillaManifest.arguments.game || [])))
 
         for(let i=0; i<args.length; i++){
             if(typeof args[i] === 'object' && args[i].rules != null){

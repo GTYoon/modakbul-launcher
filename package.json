@@ -1,6 +1,6 @@
 {
   "name": "modakbul-season1-launcher",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "productName": "모닥불 Season 1",
   "description": "모닥불 Season 1 전용 Minecraft 런처",
   "author": "모닥불 Season 1 운영팀",
@@ -17,7 +17,9 @@
     "dist:win": "npm run dist -- -w",
     "dist:mac": "npm run dist -- -m",
     "dist:linux": "npm run dist -- -l",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:auth-race": "node tools/Test-AuthValidationRace.js",
+    "verify:play-fix": "node tools/Verify-PlayFix.js"
   },
   "engines": {
     "node": "22.x.x"
