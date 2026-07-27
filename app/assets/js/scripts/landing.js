@@ -39,6 +39,7 @@ const launch_details          = document.getElementById('launch_details')
 const launch_progress         = document.getElementById('launch_progress')
 const launch_progress_label   = document.getElementById('launch_progress_label')
 const launch_details_text     = document.getElementById('launch_details_text')
+const launch_button           = document.getElementById('launch_button')
 const server_selection_button = document.getElementById('server_selection_button')
 const user_text               = document.getElementById('user_text')
 
@@ -82,6 +83,41 @@ function escapeHTML(value){
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll('\'', '&#039;')
+}
+
+async function withTimeout(promise, timeoutMs, timeoutMessage){
+    let timeoutHandle
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)
+            })
+        ])
+    } finally {
+        clearTimeout(timeoutHandle)
+    }
+}
+
+async function withInactivityTimeout(operation, timeoutMs, timeoutMessage){
+    let timeoutHandle
+    let rejectTimeout
+    const timeoutPromise = new Promise((_, reject) => {
+        rejectTimeout = reject
+    })
+    const refreshTimeout = () => {
+        clearTimeout(timeoutHandle)
+        timeoutHandle = setTimeout(() => rejectTimeout(new Error(timeoutMessage)), timeoutMs)
+    }
+    refreshTimeout()
+    try {
+        return await Promise.race([
+            operation(refreshTimeout),
+            timeoutPromise
+        ])
+    } finally {
+        clearTimeout(timeoutHandle)
+    }
 }
 
 /* Launch Progress Wrapper Functions */
@@ -136,21 +172,90 @@ function setDownloadPercentage(percent){
  * 
  * @param {boolean} val True to enable, false to disable.
  */
+let launchServerReady = false
 function setLaunchEnabled(val){
-    document.getElementById('launch_button').disabled = !val
+    launchServerReady = val
+    // A disabled HTML button never dispatches click events, which made a
+    // missing/stale server selection look like the launcher ignored PLAY.
+    // Keep it clickable so the handler can repair the selection or explain
+    // the problem.
+    launch_button.disabled = false
+    launch_button.setAttribute('aria-disabled', String(!val))
 }
 
 // Bind launch button
-document.getElementById('launch_button').addEventListener('click', async e => {
-    loggerLanding.info('Launching game..')
-    if(ConfigManager.getSelectedAccount() == null){
-        showLoginRequired()
+let launchRequestInProgress = false
+launch_button.addEventListener('click', async e => {
+    e.preventDefault()
+    e.currentTarget.blur()
+
+    if(proc != null && proc.exitCode == null){
+        setOverlayContent(
+            Lang.queryJS('landing.launch.gameRunningTitle'),
+            Lang.queryJS('landing.launch.gameRunningText'),
+            Lang.queryJS('overlay.dismiss')
+        )
+        setOverlayHandler(() => toggleOverlay(false))
+        setDismissHandler(null)
+        toggleOverlay(true)
         return
     }
 
+    if(launchRequestInProgress){
+        appendLaunchLog('WARN', 'Ignored a duplicate PLAY request while another launch is in progress.')
+        setLaunchDetails(Lang.queryJS('landing.launch.alreadyLaunching'))
+        return
+    }
+
+    launchRequestInProgress = true
     beginLaunchLog()
     try {
-        const server = (await DistroAPI.getDistribution()).getServerById(ConfigManager.getSelectedServer())
+        loggerLanding.info('Launching game..')
+        appendLaunchLog('INFO', `PLAY clicked; serverReady=${launchServerReady}; selectedServer=${ConfigManager.getSelectedServer() || 'none'}`)
+
+        const selectedAccount = ConfigManager.getSelectedAccount()
+        if(selectedAccount == null || typeof selectedAccount.accessToken !== 'string' || selectedAccount.accessToken.length === 0){
+            appendLaunchLog('WARN', 'No usable Minecraft account is selected.')
+            showLoginRequired()
+            return
+        }
+
+        setLaunchDetails(Lang.queryJS('landing.launch.requestAccepted'))
+        toggleLaunchArea(true)
+        setLaunchPercentage(0)
+
+        setLaunchDetails(Lang.queryJS('landing.launch.validatingAccount'))
+        let accountValid = false
+        try {
+            accountValid = await withTimeout(
+                AuthManager.validateSelected(),
+                45000,
+                Lang.queryJS('landing.launch.accountValidationTimeout')
+            )
+        } catch(err) {
+            appendLaunchLog('ERROR', 'Minecraft account validation failed.', err)
+            showLaunchFailure(
+                Lang.queryJS('landing.launch.failureTitle'),
+                Lang.queryJS('landing.launch.accountValidationFailed'),
+                err
+            )
+            return
+        }
+        if(!accountValid){
+            appendLaunchLog('WARN', 'The selected Minecraft account is expired or could not be refreshed.')
+            showLoginRequired()
+            return
+        }
+
+        const distro = await DistroAPI.getDistribution()
+        let server = distro.getServerById(ConfigManager.getSelectedServer())
+        if(server == null){
+            server = distro.getMainServer()
+            if(server != null){
+                appendLaunchLog('WARN', `Selected server was unavailable; recovered with ${server.rawServer.id}.`)
+                updateSelectedServer(server)
+            }
+        }
         if(server == null){
             throw new Error('Selected server is unavailable.')
         }
@@ -180,6 +285,8 @@ document.getElementById('launch_button').addEventListener('click', async e => {
             err.message || Lang.queryJS('landing.launch.failureText'),
             err
         )
+    } finally {
+        launchRequestInProgress = false
     }
 })
 
@@ -406,12 +513,12 @@ async function asyncSystemScan(effectiveJavaOptions, launchAfter = true){
             Lang.queryJS('landing.systemScan.installJava'),
             Lang.queryJS('landing.systemScan.installJavaManually')
         )
-        setOverlayHandler(() => {
+        setOverlayHandler(async () => {
             setLaunchDetails(Lang.queryJS('landing.systemScan.javaDownloadPrepare'))
             toggleOverlay(false)
             
             try {
-                downloadJava(effectiveJavaOptions, launchAfter)
+                await downloadJava(effectiveJavaOptions, launchAfter)
             } catch(err) {
                 loggerLanding.error('Unhandled error in Java Download', err)
                 showLaunchFailure(
@@ -434,10 +541,19 @@ async function asyncSystemScan(effectiveJavaOptions, launchAfter = true){
                     toggleLaunchArea(false)
                     toggleOverlay(false)
                 })
-                setDismissHandler(() => {
+                setDismissHandler(async () => {
                     toggleOverlay(false, true)
 
-                    asyncSystemScan(effectiveJavaOptions, launchAfter)
+                    try {
+                        await asyncSystemScan(effectiveJavaOptions, launchAfter)
+                    } catch(err) {
+                        loggerLanding.error('Unhandled error while rescanning Java.', err)
+                        showLaunchFailure(
+                            Lang.queryJS('landing.systemScan.javaDownloadFailureTitle'),
+                            err.message || Lang.queryJS('landing.systemScan.javaDownloadFailureText'),
+                            err
+                        )
+                    }
                 })
                 $('#overlayContent').fadeIn(250)
             })
@@ -486,7 +602,7 @@ async function downloadJava(effectiveJavaOptions, launchAfter = true) {
     if(received != asset.size) {
         loggerLanding.warn(`Java Download: Expected ${asset.size} bytes but received ${received}`)
         if(!await validateLocalFile(asset.path, asset.algo, asset.hash)) {
-            log.error(`Hashes do not match, ${asset.id} may be corrupted.`)
+            loggerLanding.error(`Hashes do not match, ${asset.id} may be corrupted.`)
             // Don't know how this could happen, but report it.
             throw new Error(Lang.queryJS('landing.downloadJava.javaDownloadCorruptedError'))
         }
@@ -509,21 +625,25 @@ async function downloadJava(effectiveJavaOptions, launchAfter = true) {
         setLaunchDetails(eLStr + dotStr)
     }, 750)
 
-    const newJavaExec = await extractJdk(asset.path)
-
-    // Extraction complete, remove the loading from the OS progress bar.
-    remote.getCurrentWindow().setProgressBar(-1)
+    let newJavaExec
+    try {
+        newJavaExec = await extractJdk(asset.path)
+    } finally {
+        clearInterval(extractListener)
+        // Extraction complete (or failed), remove the loading from the OS
+        // progress bar and stop the animated status timer.
+        remote.getCurrentWindow().setProgressBar(-1)
+    }
 
     // Extraction completed successfully.
     ConfigManager.setJavaExecutable(ConfigManager.getSelectedServer(), newJavaExec)
     ConfigManager.save()
 
-    clearInterval(extractListener)
     setLaunchDetails(Lang.queryJS('landing.downloadJava.javaInstalled'))
 
     // TODO Callback hell
     // Refactor the launch functions
-    asyncSystemScan(effectiveJavaOptions, launchAfter)
+    await asyncSystemScan(effectiveJavaOptions, launchAfter)
 
 }
 
@@ -535,7 +655,9 @@ let hasRPC = false
 // Change this if your server uses something different.
 const GAME_JOINED_REGEX = /\[.+\]: Sound engine started/
 const GAME_LAUNCH_REGEX = /^\[.+\]: (?:MinecraftForge .+ Initialized|ModLauncher .+ starting: .+|Loading Minecraft .+ with Fabric Loader .+)$/
+const GAME_READY_REGEX = /^\[.+\]: (?:Backend library: LWJGL version .+|Sound engine started)$/
 const MIN_LINGER = 5000
+const LAUNCH_OUTPUT_TIMEOUT = 180000
 
 async function dlAsync(login = true) {
 
@@ -561,7 +683,21 @@ async function dlAsync(login = true) {
         return
     }
 
-    const serv = distro.getServerById(ConfigManager.getSelectedServer())
+    let serv = distro.getServerById(ConfigManager.getSelectedServer())
+    if(serv == null){
+        serv = distro.getMainServer()
+        if(serv != null){
+            loggerLaunchSuite.warn(`Recovered missing selected server with ${serv.rawServer.id}.`)
+            updateSelectedServer(serv)
+        }
+    }
+    if(serv == null){
+        showLaunchFailure(
+            Lang.queryJS('landing.dlAsync.fatalError'),
+            Lang.queryJS('landing.launch.serverUnavailable')
+        )
+        return
+    }
 
     if(login) {
         if(ConfigManager.getSelectedAccount() == null){
@@ -584,70 +720,78 @@ async function dlAsync(login = true) {
     )
 
     fullRepairModule.spawnReceiver()
-
-    fullRepairModule.childProcess.on('error', (err) => {
-        loggerLaunchSuite.error('Error during launch', err)
-        showLaunchFailure(
-            Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
-            err.message || Lang.queryJS('landing.dlAsync.errorDuringLaunchText'),
-            err
-        )
+    const repairProcess = fullRepairModule.childProcess
+    let repairStage = 'validation'
+    let repairComplete = false
+    let rejectReceiverFailure
+    const receiverFailure = new Promise((_, reject) => {
+        rejectReceiverFailure = reject
     })
-    fullRepairModule.childProcess.on('close', (code, _signal) => {
-        if(code !== 0){
-            loggerLaunchSuite.error(`Full Repair Module exited with code ${code}, assuming error.`)
-            showLaunchFailure(
-                Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
-                Lang.queryJS('landing.dlAsync.gameFileWorkerExited', { code })
-            )
+    const onReceiverError = err => {
+        rejectReceiverFailure(err)
+    }
+    const onReceiverClose = code => {
+        if(!repairComplete){
+            const err = new Error(Lang.queryJS('landing.dlAsync.gameFileWorkerExited', { code }))
+            err.code = code
+            rejectReceiverFailure(err)
         }
-    })
+    }
+    repairProcess.once('error', onReceiverError)
+    repairProcess.once('close', onReceiverClose)
 
-    loggerLaunchSuite.info('Validating files.')
-    setLaunchDetails(Lang.queryJS('landing.dlAsync.validatingFileIntegrity'))
-    let invalidFileCount = 0
     try {
-        invalidFileCount = await fullRepairModule.verifyFiles(percent => {
-            setLaunchPercentage(percent)
-        })
+        loggerLaunchSuite.info('Validating files.')
+        setLaunchDetails(Lang.queryJS('landing.dlAsync.validatingFileIntegrity'))
+        const invalidFileCount = await Promise.race([
+            withInactivityTimeout(refreshTimeout => fullRepairModule.verifyFiles(percent => {
+                refreshTimeout()
+                setLaunchPercentage(percent)
+            }), 180000, Lang.queryJS('landing.launch.repairWorkerTimeout')),
+            receiverFailure
+        ])
         setLaunchPercentage(100)
-    } catch (err) {
-        loggerLaunchSuite.error('Error during file validation.')
+
+        if(invalidFileCount > 0) {
+            repairStage = 'download'
+            loggerLaunchSuite.info('Downloading files.')
+            setLaunchDetails(Lang.queryJS('landing.dlAsync.downloadingFiles'))
+            setLaunchPercentage(0)
+            await Promise.race([
+                withInactivityTimeout(refreshTimeout => fullRepairModule.download(percent => {
+                    refreshTimeout()
+                    setDownloadPercentage(percent)
+                }), 180000, Lang.queryJS('landing.launch.repairWorkerTimeout')),
+                receiverFailure
+            ])
+            setDownloadPercentage(100)
+        } else {
+            loggerLaunchSuite.info('No invalid files, skipping download.')
+        }
+        repairComplete = true
+    } catch(err) {
+        loggerLaunchSuite.error(`Error during file ${repairStage}.`, err)
         showLaunchFailure(
-            Lang.queryJS('landing.dlAsync.errorDuringFileVerificationTitle'),
+            repairStage === 'download'
+                ? Lang.queryJS('landing.dlAsync.errorDuringFileDownloadTitle')
+                : Lang.queryJS('landing.dlAsync.errorDuringFileVerificationTitle'),
             err.displayable || err.message || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'),
             err
         )
         return
-    }
-    
-
-    if(invalidFileCount > 0) {
-        loggerLaunchSuite.info('Downloading files.')
-        setLaunchDetails(Lang.queryJS('landing.dlAsync.downloadingFiles'))
-        setLaunchPercentage(0)
-        try {
-            await fullRepairModule.download(percent => {
-                setDownloadPercentage(percent)
-            })
-            setDownloadPercentage(100)
-        } catch(err) {
-            loggerLaunchSuite.error('Error during file download.')
-            showLaunchFailure(
-                Lang.queryJS('landing.dlAsync.errorDuringFileDownloadTitle'),
-                err.displayable || err.message || Lang.queryJS('landing.dlAsync.seeConsoleForDetails'),
-                err
-            )
-            return
+    } finally {
+        repairProcess.removeListener('error', onReceiverError)
+        repairProcess.removeListener('close', onReceiverClose)
+        if(repairProcess.connected){
+            try {
+                fullRepairModule.destroyReceiver()
+            } catch(err) {
+                loggerLaunchSuite.warn('Unable to close the game file worker cleanly.', err)
+            }
         }
-    } else {
-        loggerLaunchSuite.info('No invalid files, skipping download.')
+        remote.getCurrentWindow().setProgressBar(-1)
     }
 
-    // Remove download bar.
-    remote.getCurrentWindow().setProgressBar(-1)
-
-    fullRepairModule.destroyReceiver()
     ConfigManager.setGamePackVersion(serv.rawServer.id, String(serv.rawServer.version))
     ConfigManager.save()
     clearGameFilesUpdateUI()
@@ -676,42 +820,110 @@ async function dlAsync(login = true) {
         const SERVER_JOINED_REGEX = new RegExp(`\\[.+\\]: \\[CHAT\\] ${authUser.displayName} joined the game`)
 
         let launchAreaClosed = false
+        let launchConsideredStarted = false
+        let launchLoadingSignalObserved = false
+        let launchReadySignalObserved = false
         let processFailureShown = false
         let launchedProcess = null
+        let launchCompleteTimer = null
+        let launchFallbackTimer = null
 
-        const onLoadComplete = () => {
+        const clearLaunchTimers = () => {
+            if(launchCompleteTimer != null){
+                clearTimeout(launchCompleteTimer)
+                launchCompleteTimer = null
+            }
+            if(launchFallbackTimer != null){
+                clearTimeout(launchFallbackTimer)
+                launchFallbackTimer = null
+            }
+        }
+
+        const start = Date.now()
+        const launchOutputBuffers = {
+            stdout: '',
+            stderr: ''
+        }
+
+        function detachLaunchOutputListeners(){
+            if(launchedProcess?.stdout != null){
+                launchedProcess.stdout.removeListener('data', stdoutLaunchListener)
+            }
+            if(launchedProcess?.stderr != null){
+                launchedProcess.stderr.removeListener('data', stderrLaunchListener)
+            }
+        }
+
+        function onLoadComplete(reason = 'output'){
             if(launchAreaClosed){
                 return
             }
+            clearLaunchTimers()
             launchAreaClosed = true
+            launchConsideredStarted = true
+            appendLaunchLog('INFO', `Minecraft launch UI completed after ${reason}.`)
             toggleLaunchArea(false)
             if(hasRPC && launchedProcess?.stdout != null){
                 DiscordWrapper.updateDetails(Lang.queryJS('landing.discord.loading'))
                 launchedProcess.stdout.on('data', gameStateChange)
             }
-            if(launchedProcess?.stdout != null){
-                launchedProcess.stdout.removeListener('data', tempListener)
-            }
-            if(launchedProcess?.stderr != null){
-                launchedProcess.stderr.removeListener('data', gameErrorListener)
-            }
+            detachLaunchOutputListeners()
         }
-        const start = Date.now()
 
         // Attach a temporary listener to the client output.
-        // Will wait for a certain bit of text meaning that
-        // the client application has started, and we can hide
-        // the progress bar stuff.
-        const tempListener = function(data){
-            if(GAME_LAUNCH_REGEX.test(data.trim())){
+        // Preserve partial lines across data chunks and inspect both stdout and
+        // stderr. Fabric can write the same startup sequence to either stream.
+        function inspectLaunchLine(rawLine){
+            const line = String(rawLine).replace(/\u001B\[[0-9;]*m/g, '').trim()
+            if(line.length === 0){
+                return
+            }
+            if(!launchLoadingSignalObserved && GAME_LAUNCH_REGEX.test(line)){
+                launchLoadingSignalObserved = true
+                appendLaunchLog('INFO', 'Observed Minecraft/Fabric loader startup output.')
+            }
+            if(!launchReadySignalObserved && GAME_READY_REGEX.test(line)){
+                launchReadySignalObserved = true
+                appendLaunchLog('INFO', 'Observed Minecraft render/audio readiness output.')
                 const diff = Date.now()-start
                 if(diff < MIN_LINGER) {
-                    setTimeout(onLoadComplete, MIN_LINGER-diff)
+                    launchCompleteTimer = setTimeout(() => onLoadComplete('render/audio readiness output'), MIN_LINGER-diff)
                 } else {
-                    onLoadComplete()
+                    onLoadComplete('render/audio readiness output')
                 }
             }
+            if(line.includes('Could not find or load main class net.minecraft.launchwrapper.Launch')){
+                loggerLaunchSuite.error('Game launch failed, LaunchWrapper was not downloaded properly.')
+                processFailureShown = true
+                clearLaunchTimers()
+                detachLaunchOutputListeners()
+                showLaunchFailure(
+                    Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
+                    Lang.queryJS('landing.dlAsync.launchWrapperNotDownloaded'),
+                    null,
+                    launchedProcess?.launchLogPath || launcherLogPath
+                )
+            }
         }
+
+        function inspectLaunchOutput(channel, data){
+            const buffered = launchOutputBuffers[channel] + String(data)
+            const lines = buffered.split(/\r?\n/)
+            launchOutputBuffers[channel] = lines.pop() || ''
+            lines.forEach(inspectLaunchLine)
+
+            const pendingLine = launchOutputBuffers[channel]
+            const normalizedPendingLine = pendingLine.replace(/\u001B\[[0-9;]*m/g, '').trim()
+            if(GAME_LAUNCH_REGEX.test(normalizedPendingLine)
+                || GAME_READY_REGEX.test(normalizedPendingLine)
+                || normalizedPendingLine.includes('Could not find or load main class net.minecraft.launchwrapper.Launch')){
+                launchOutputBuffers[channel] = ''
+                inspectLaunchLine(pendingLine)
+            }
+        }
+
+        const stdoutLaunchListener = data => inspectLaunchOutput('stdout', data)
+        const stderrLaunchListener = data => inspectLaunchOutput('stderr', data)
 
         // Listener for Discord RPC.
         const gameStateChange = function(data){
@@ -723,36 +935,54 @@ async function dlAsync(login = true) {
             }
         }
 
-        const gameErrorListener = function(data){
-            data = data.trim()
-            if(data.indexOf('Could not find or load main class net.minecraft.launchwrapper.Launch') > -1){
-                loggerLaunchSuite.error('Game launch failed, LaunchWrapper was not downloaded properly.')
-                processFailureShown = true
-                showLaunchFailure(
-                    Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
-                    Lang.queryJS('landing.dlAsync.launchWrapperNotDownloaded'),
-                    null,
-                    launchedProcess?.launchLogPath || launcherLogPath
-                )
-            }
-        }
-
         try {
             // Build Minecraft process.
             launchedProcess = pb.build()
             proc = launchedProcess
 
-            // Bind listeners to stdout.
-            launchedProcess.stdout.on('data', tempListener)
-            launchedProcess.stderr.on('data', gameErrorListener)
+            // Bind readiness listeners to both output streams.
+            launchedProcess.stdout.on('data', stdoutLaunchListener)
+            launchedProcess.stderr.on('data', stderrLaunchListener)
 
             launchedProcess.once('spawn', () => {
-                setLaunchDetails(Lang.queryJS('landing.dlAsync.doneEnjoyServer'))
-                setTimeout(() => {
-                    if(launchedProcess.exitCode == null && !launchedProcess.killed){
-                        onLoadComplete()
+                setLaunchDetails(Lang.queryJS('landing.launch.waitingForGame'))
+                appendLaunchLog('INFO', `Java process spawned with PID ${launchedProcess.pid}. Waiting for Minecraft readiness output.`)
+                launchFallbackTimer = setTimeout(async () => {
+                    if(!launchConsideredStarted && launchedProcess.exitCode == null && !launchedProcess.killed){
+                        processFailureShown = true
+                        launchAreaClosed = true
+                        clearLaunchTimers()
+                        detachLaunchOutputListeners()
+                        let stopRequested = false
+                        try {
+                            stopRequested = launchedProcess.kill()
+                        } catch(err) {
+                            appendLaunchLog('ERROR', 'Unable to stop the unresponsive Minecraft process.', err)
+                        }
+                        let processStopped = launchedProcess.exitCode != null
+                        if(stopRequested && !processStopped){
+                            processStopped = await new Promise(resolve => {
+                                const closeConfirmationTimer = setTimeout(() => {
+                                    launchedProcess.removeListener('close', onCloseConfirmed)
+                                    resolve(false)
+                                }, 5000)
+                                const onCloseConfirmed = () => {
+                                    clearTimeout(closeConfirmationTimer)
+                                    resolve(true)
+                                }
+                                launchedProcess.once('close', onCloseConfirmed)
+                            })
+                        }
+                        showLaunchFailure(
+                            Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
+                            Lang.queryJS(processStopped
+                                ? 'landing.launch.startupTimeout'
+                                : 'landing.launch.startupTimeoutKillFailed'),
+                            null,
+                            launchedProcess.launchLogPath || launcherLogPath
+                        )
                     }
-                }, MIN_LINGER)
+                }, LAUNCH_OUTPUT_TIMEOUT)
             })
 
             launchedProcess.once('error', err => {
@@ -760,6 +990,8 @@ async function dlAsync(login = true) {
                     return
                 }
                 processFailureShown = true
+                clearLaunchTimers()
+                detachLaunchOutputListeners()
                 showLaunchFailure(
                     Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
                     Lang.queryJS('landing.launch.processStartFailed', { error: escapeHTML(err.message || err.code || err) }),
@@ -769,7 +1001,12 @@ async function dlAsync(login = true) {
             })
 
             launchedProcess.once('close', (code, signal) => {
-                if(!launchAreaClosed && !processFailureShown){
+                clearLaunchTimers()
+                detachLaunchOutputListeners()
+                if(proc === launchedProcess){
+                    proc = null
+                }
+                if(!processFailureShown && (code !== 0 || !launchConsideredStarted)){
                     processFailureShown = true
                     showLaunchFailure(
                         Lang.queryJS('landing.dlAsync.errorDuringLaunchTitle'),
@@ -788,9 +1025,6 @@ async function dlAsync(login = true) {
                     loggerLaunchSuite.info('Shutting down Discord Rich Presence..')
                     DiscordWrapper.shutdownRPC()
                     hasRPC = false
-                    if(proc === launchedProcess){
-                        proc = null
-                    }
                 })
             }
 

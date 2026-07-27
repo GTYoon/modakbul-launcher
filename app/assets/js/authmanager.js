@@ -317,15 +317,42 @@ exports.removeMicrosoftAccount = async function(uuid){
  * @returns {Promise.<boolean>} Promise which resolves to true if the access token is valid,
  * otherwise false.
  */
-async function validateSelectedMojangAccount(){
-    const current = ConfigManager.getSelectedAccount()
+const activeAccountValidations = new Map()
+
+function createValidationSnapshot(current){
+    return {
+        uuid: current.uuid,
+        type: current.type,
+        accessToken: current.accessToken,
+        microsoftAccessToken: current.microsoft?.access_token || null,
+        microsoftRefreshToken: current.microsoft?.refresh_token || null
+    }
+}
+
+function selectedAccountMatchesSnapshot(snapshot){
+    const selected = ConfigManager.getSelectedAccount()
+    return selected != null
+        && selected.uuid === snapshot.uuid
+        && selected.type === snapshot.type
+        && selected.accessToken === snapshot.accessToken
+        && (selected.microsoft?.access_token || null) === snapshot.microsoftAccessToken
+        && (selected.microsoft?.refresh_token || null) === snapshot.microsoftRefreshToken
+}
+
+async function validateSelectedMojangAccount(current, snapshot){
     const response = await MojangRestAPI.validate(current.accessToken, ConfigManager.getClientToken())
 
     if(response.responseStatus === RestResponseStatus.SUCCESS) {
+        if(!selectedAccountMatchesSnapshot(snapshot)){
+            return false
+        }
         const isValid = response.data
         if(!isValid){
             const refreshResponse = await MojangRestAPI.refresh(current.accessToken, ConfigManager.getClientToken())
             if(refreshResponse.responseStatus === RestResponseStatus.SUCCESS) {
+                if(!selectedAccountMatchesSnapshot(snapshot)){
+                    return false
+                }
                 const session = refreshResponse.data
                 ConfigManager.updateMojangAuthAccount(current.uuid, session.accessToken)
                 ConfigManager.save()
@@ -341,7 +368,7 @@ async function validateSelectedMojangAccount(){
             return true
         }
     }
-    
+    return false
 }
 
 /**
@@ -352,8 +379,7 @@ async function validateSelectedMojangAccount(){
  * @returns {Promise.<boolean>} Promise which resolves to true if the access token is valid,
  * otherwise false.
  */
-async function validateSelectedMicrosoftAccount(){
-    const current = ConfigManager.getSelectedAccount()
+async function validateSelectedMicrosoftAccount(current, snapshot){
     const now = new Date().getTime()
     const mcExpiresAt = current.expiresAt
     const mcExpired = now >= mcExpiresAt
@@ -372,6 +398,9 @@ async function validateSelectedMicrosoftAccount(){
         try {
             const res = await fullMicrosoftAuthFlow(current.microsoft.refresh_token, AUTH_MODE.MS_REFRESH)
 
+            if(!selectedAccountMatchesSnapshot(snapshot)){
+                return false
+            }
             ConfigManager.updateMicrosoftAuthAccount(
                 current.uuid,
                 res.mcToken.access_token,
@@ -390,6 +419,9 @@ async function validateSelectedMicrosoftAccount(){
         try {
             const res = await fullMicrosoftAuthFlow(current.microsoft.access_token, AUTH_MODE.MC_REFRESH)
 
+            if(!selectedAccountMatchesSnapshot(snapshot)){
+                return false
+            }
             ConfigManager.updateMicrosoftAuthAccount(
                 current.uuid,
                 res.mcToken.access_token,
@@ -415,11 +447,27 @@ async function validateSelectedMicrosoftAccount(){
  */
 exports.validateSelected = async function(){
     const current = ConfigManager.getSelectedAccount()
-
-    if(current.type === 'microsoft') {
-        return await validateSelectedMicrosoftAccount()
-    } else {
-        return await validateSelectedMojangAccount()
+    if(current == null){
+        return false
     }
-    
+
+    const snapshot = createValidationSnapshot(current)
+    const validationKey = JSON.stringify(snapshot)
+    const existingValidation = activeAccountValidations.get(validationKey)
+    if(existingValidation != null){
+        return await existingValidation
+    }
+
+    const validation = current.type === 'microsoft'
+        ? validateSelectedMicrosoftAccount(current, snapshot)
+        : validateSelectedMojangAccount(current, snapshot)
+    activeAccountValidations.set(validationKey, validation)
+
+    try {
+        return await validation
+    } finally {
+        if(activeAccountValidations.get(validationKey) === validation){
+            activeAccountValidations.delete(validationKey)
+        }
+    }
 }

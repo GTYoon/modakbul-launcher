@@ -5,7 +5,6 @@ remoteMain.initialize()
 const { app, BrowserWindow, ipcMain, Menu, shell } = require('electron')
 const autoUpdater                       = require('electron-updater').autoUpdater
 const ejse                              = require('ejs-electron')
-const fs                                = require('fs')
 const isDev                             = require('./app/assets/js/isdev')
 const path                              = require('path')
 const semver                            = require('semver')
@@ -114,14 +113,27 @@ const REDIRECT_URI_PREFIX = 'https://login.microsoftonline.com/common/oauth2/nat
 // Microsoft Auth Login
 let msftAuthWindow
 let msftAuthSuccess
+let msftAuthReplySent
 let msftAuthViewSuccess
 let msftAuthViewOnClose
+let msftAuthLoadTimer
 ipcMain.on(MSFT_OPCODE.OPEN_LOGIN, (ipcEvent, ...arguments_) => {
-    if (msftAuthWindow) {
-        ipcEvent.reply(MSFT_OPCODE.REPLY_LOGIN, MSFT_REPLY_TYPE.ERROR, MSFT_ERROR.ALREADY_OPEN, msftAuthViewOnClose)
+    if (msftAuthWindow && !msftAuthWindow.isDestroyed()) {
+        if(msftAuthWindow.isMinimized()){
+            msftAuthWindow.restore()
+        }
+        msftAuthWindow.show()
+        msftAuthWindow.focus()
+        ipcEvent.reply(
+            MSFT_OPCODE.REPLY_LOGIN,
+            MSFT_REPLY_TYPE.ERROR,
+            MSFT_ERROR.ALREADY_OPEN,
+            arguments_[1] || msftAuthViewOnClose
+        )
         return
     }
     msftAuthSuccess = false
+    msftAuthReplySent = false
     msftAuthViewSuccess = arguments_[0]
     msftAuthViewOnClose = arguments_[1]
     msftAuthWindow = new BrowserWindow({
@@ -129,16 +141,63 @@ ipcMain.on(MSFT_OPCODE.OPEN_LOGIN, (ipcEvent, ...arguments_) => {
         backgroundColor: '#222222',
         width: 520,
         height: 600,
+        parent: win || undefined,
         frame: true,
+        show: false,
         icon: getPlatformIcon('SealCircle')
     })
 
+    const showMicrosoftAuthWindow = () => {
+        if(msftAuthLoadTimer != null){
+            clearTimeout(msftAuthLoadTimer)
+            msftAuthLoadTimer = null
+        }
+        if(msftAuthWindow && !msftAuthWindow.isDestroyed()){
+            msftAuthWindow.show()
+            msftAuthWindow.focus()
+        }
+    }
+
+    const failMicrosoftAuthLoad = error => {
+        if(msftAuthReplySent){
+            return
+        }
+        msftAuthReplySent = true
+        console.error('Microsoft authentication page failed to load.', error)
+        ipcEvent.reply(
+            MSFT_OPCODE.REPLY_LOGIN,
+            MSFT_REPLY_TYPE.ERROR,
+            MSFT_ERROR.LOAD_FAILED,
+            msftAuthViewOnClose
+        )
+        if(msftAuthWindow && !msftAuthWindow.isDestroyed()){
+            msftAuthWindow.close()
+        }
+    }
+
+    msftAuthWindow.once('ready-to-show', showMicrosoftAuthWindow)
+    msftAuthWindow.webContents.once('did-finish-load', showMicrosoftAuthWindow)
+    msftAuthLoadTimer = setTimeout(() => {
+        failMicrosoftAuthLoad(new Error('Microsoft authentication page load timed out.'))
+    }, 60000)
+
+    msftAuthWindow.webContents.on('did-fail-load', (_, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if(isMainFrame && errorCode !== -3){
+            failMicrosoftAuthLoad(new Error(`${errorDescription} (${errorCode}) ${validatedURL}`))
+        }
+    })
+
     msftAuthWindow.on('closed', () => {
+        if(msftAuthLoadTimer != null){
+            clearTimeout(msftAuthLoadTimer)
+            msftAuthLoadTimer = null
+        }
         msftAuthWindow = undefined
     })
 
     msftAuthWindow.on('close', () => {
-        if(!msftAuthSuccess) {
+        if(!msftAuthSuccess && !msftAuthReplySent) {
+            msftAuthReplySent = true
             ipcEvent.reply(MSFT_OPCODE.REPLY_LOGIN, MSFT_REPLY_TYPE.ERROR, MSFT_ERROR.NOT_FINISHED, msftAuthViewOnClose)
         }
     })
@@ -148,9 +207,10 @@ ipcMain.on(MSFT_OPCODE.OPEN_LOGIN, (ipcEvent, ...arguments_) => {
             let queryMap = {}
             
             new URL(uri).searchParams.forEach((v, k) => {
-                queryMap[k] = v;
-            });
+                queryMap[k] = v
+            })
 
+            msftAuthReplySent = true
             ipcEvent.reply(MSFT_OPCODE.REPLY_LOGIN, MSFT_REPLY_TYPE.SUCCESS, queryMap, msftAuthViewSuccess)
 
             msftAuthSuccess = true
@@ -326,40 +386,8 @@ function getPlatformIcon(filename){
     return path.join(__dirname, 'app', 'assets', 'images', `${filename}.png`)
 }
 
-/**
- * Keep the public desktop shortcut pointed at the executable which is
- * currently running. This repairs shortcuts left behind by old unpacked
- * copies or a previous Program Files installation after an NSIS update.
- */
-function repairWindowsDesktopShortcut(){
-    if(process.platform !== 'win32' || !app.isPackaged){
-        return
-    }
-
-    const shortcutPath = path.join(app.getPath('desktop'), '모닥불 Season 1.lnk')
-    const shortcutDetails = {
-        target: process.execPath,
-        cwd: path.dirname(process.execPath),
-        icon: process.execPath,
-        iconIndex: 0,
-        description: `모닥불 Season 1 런처 v${app.getVersion()}`,
-        appUserModelId: 'kr.modakbul.season1.launcher'
-    }
-
-    try {
-        const operation = fs.existsSync(shortcutPath) ? 'replace' : 'create'
-        if(!shell.writeShortcutLink(shortcutPath, operation, shortcutDetails)){
-            console.warn(`Unable to repair desktop shortcut at ${shortcutPath}`)
-        }
-    } catch(err) {
-        // A shortcut failure must never prevent the launcher from opening.
-        console.warn('Unable to repair the Modakbul desktop shortcut.', err)
-    }
-}
-
 app.on('ready', createWindow)
 app.on('ready', createMenu)
-app.on('ready', repairWindowsDesktopShortcut)
 
 app.on('window-all-closed', () => {
     // On macOS it is common for applications and their menu bar
