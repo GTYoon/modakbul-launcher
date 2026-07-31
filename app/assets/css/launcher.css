@@ -3511,6 +3511,11 @@ input:checked + .toggleSwitchSlider:before {
     line-height: 24px;
     padding: 0px;
     transition: 0.25s ease;
+    /* Avenir does not include Hangul glyphs.  Use a Windows Korean font
+       before the decorative Latin font so the selected-server label (for
+       example, "모닥불 Season 1") is never rendered as broken squares. */
+    font-family: 'Malgun Gothic', 'Noto Sans KR', 'Avenir Medium', sans-serif;
+    letter-spacing: 0.25px;
 }
 #server_selection_button:hover,
 #server_selection_button:focus {
