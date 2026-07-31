@@ -8,7 +8,16 @@ asar: true
 compression: 'maximum'
 
 files:
-  - '!{dist,.gitignore,.vscode,docs,dev-app-update.yml,.nvmrc,eslint.config.mjs}'
+  - '**/*'
+  # electron-builder normally discovers production dependencies itself.  The
+  # portable build environment used for this launcher can skip that discovery,
+  # leaving app.asar without runtime modules.  build-electron.js prepares the
+  # exact production dependency closure in runtime_node_modules instead.
+  - '!{dist,.gitignore,.vscode,docs,dev-app-update.yml,.nvmrc,eslint.config.mjs,runtime_node_modules}'
+  - from: 'runtime_node_modules'
+    to: 'node_modules'
+    filter:
+      - '**/*'
 
 extraResources:
   - 'libraries'
