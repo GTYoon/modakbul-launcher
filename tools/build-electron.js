@@ -6,12 +6,14 @@ const path = require('path')
 
 const projectRoot = path.resolve(__dirname, '..')
 
-// The portable build host uses Electron as its Node runtime.  Its default
-// ASAR-aware fs wrapper treats the output app.asar like a directory while
-// electron-builder is calculating archive integrity, so turn that wrapper off
-// for the build process only.
+// Building electron-builder inside Electron's embedded Node runtime can create
+// an app.asar whose header offsets no longer match the file payload.  The
+// resulting launcher exits before it can create its normal log.  Refuse that
+// build path entirely; releases must be produced by a native Node 22 runtime.
 if(process.versions.electron) {
-    process.noAsar = true
+    throw new Error(
+        'Unsafe Electron-hosted build refused. Run npm with a native Node 22 executable.'
+    )
 }
 
 /**
@@ -78,24 +80,23 @@ const builderCli = path.resolve(projectRoot, 'node_modules', 'electron-builder',
 // `build` after the script path makes v26 treat it as an unknown argument.
 const builderArguments = process.argv.slice(2)
 
-// Electron can also act as the portable Node runtime used on this build host.
-// In that mode spawning Electron with a script path makes the CLI receive the
-// path as an extra argument, so load it in-process with a normal Node argv.
-if(process.versions.electron) {
-    // yargs treats Electron argv differently and removes only its first
-    // entry.  Present the builder script as that entry so the script path is
-    // not parsed as an unknown command-line argument.
-    process.argv = [builderCli, ...builderArguments]
-    require(builderCli)
-} else {
-    const result = spawnSync(executable, [builderCli, ...builderArguments], {
+function runNodeScript(script, arguments_ = []) {
+    const result = spawnSync(executable, [script, ...arguments_], {
+        cwd: projectRoot,
         env: process.env,
         stdio: 'inherit'
     })
 
-    if(result.error) {
-        throw result.error
+    if(result.error) throw result.error
+    if(result.status !== 0) {
+        throw new Error(`${path.basename(script)} failed with exit code ${result.status}`)
     }
+}
 
-    process.exitCode = result.status === null ? 1 : result.status
+runNodeScript(builderCli, builderArguments)
+
+const archivePath = path.join(projectRoot, 'dist', 'win-unpacked', 'resources', 'app.asar')
+if(process.platform === 'win32' && fs.existsSync(archivePath)) {
+    runNodeScript(path.join(projectRoot, 'tools', 'Verify-BuiltLauncher.js'), [archivePath])
+    runNodeScript(path.join(projectRoot, 'tools', 'Verify-PlayFix.js'), [archivePath])
 }

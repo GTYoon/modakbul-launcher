@@ -6,6 +6,7 @@ copyright: 'Copyright © 2026 모닥불 Season 1 운영팀'
 
 asar: true
 compression: 'maximum'
+afterPack: 'tools/after-pack.js'
 
 files:
   - '**/*'
@@ -13,7 +14,7 @@ files:
   # portable build environment used for this launcher can skip that discovery,
   # leaving app.asar without runtime modules.  build-electron.js prepares the
   # exact production dependency closure in runtime_node_modules instead.
-  - '!{dist,.gitignore,.vscode,docs,dev-app-update.yml,.nvmrc,eslint.config.mjs,runtime_node_modules}'
+  - '!{dist,dist-*,node_modules,.gitignore,.vscode,docs,dev-app-update.yml,.nvmrc,eslint.config.mjs,runtime_node_modules}'
   - from: 'runtime_node_modules'
     to: 'node_modules'
     filter:
@@ -23,11 +24,13 @@ extraResources:
   - 'libraries'
 
 # Windows Configuration
-win: 
-  # Keep resource editing enabled so Windows receives the custom icon and product
-  # metadata. No signing certificate is configured for this release.
+win:
+  # This release is unsigned. electron-builder's combined signing/resource
+  # editing helper downloads a cross-platform archive containing Unix symlinks,
+  # which cannot be unpacked on standard Windows accounts. after-pack.js applies
+  # the icon and product metadata with the already bundled rcedit instead.
   icon: 'build/icon.png'
-  signAndEditExecutable: true
+  signAndEditExecutable: false
   target: 
     - target: 'nsis'
       arch: 'x64'

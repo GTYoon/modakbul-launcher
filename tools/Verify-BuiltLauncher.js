@@ -5,22 +5,44 @@ const asar = require('@electron/asar')
 
 const archivePath = path.resolve(process.argv[2] || 'dist/win-unpacked/resources/app.asar')
 const archiveEntries = asar.listPackage(archivePath).map(entry => entry.replace(/\\/g, '/').replace(/^\/+/, ''))
-const resolveArchiveFile = file => archiveEntries
-    .filter(entry => entry.endsWith(file))
-    .sort((left, right) => left.length - right.length)[0]
-    .replace(/\//g, path.sep)
-const readArchiveFile = file => asar.extractFile(archivePath, resolveArchiveFile(file)).toString('utf8')
 
-const packageJson = JSON.parse(readArchiveFile('package.json'))
+function requireArchiveEntry(file) {
+    if(!archiveEntries.includes(file)) {
+        throw new Error(`Missing exact ASAR entry: ${file}`)
+    }
+    return file.replace(/\//g, path.sep)
+}
+
+function readArchiveFile(file) {
+    const data = asar.extractFile(archivePath, requireArchiveEntry(file))
+    if(data.length === 0) {
+        throw new Error(`Empty ASAR entry: ${file}`)
+    }
+    return data.toString('utf8')
+}
+
+const packageJsonText = readArchiveFile('package.json')
+const packageJson = JSON.parse(packageJsonText)
 const sourcePackageJson = require(path.resolve(__dirname, '..', 'package.json'))
+const indexScript = readArchiveFile('index.js')
 const settingsScript = readArchiveFile('app/assets/js/scripts/settings.js')
 const uiCoreScript = readArchiveFile('app/assets/js/scripts/uicore.js')
 const koreanLanguage = readArchiveFile('app/assets/lang/ko_KR.toml')
+
+// Reading these files is intentional.  Presence-only checks do not detect an
+// ASAR header whose offsets point into neighbouring payloads.
+readArchiveFile('node_modules/@electron/remote/main/index.js')
+readArchiveFile('node_modules/@electron/remote/renderer/index.js')
+readArchiveFile('node_modules/helios-core/dist/index.js')
+readArchiveFile('node_modules/electron-updater/out/main.js')
 
 const result = {
     archive: archivePath,
     version: packageJson.version,
     sourceVersion: sourcePackageJson.version,
+    packageName: packageJson.name,
+    mainEntry: packageJson.main,
+    mainReadable: indexScript.includes('require(\'@electron/remote/main\')'),
     remoteMain: archiveEntries.includes('node_modules/@electron/remote/main/index.js'),
     remoteRenderer: archiveEntries.includes('node_modules/@electron/remote/renderer/index.js'),
     heliosCore: archiveEntries.includes('node_modules/helios-core/dist/index.js'),
@@ -36,6 +58,9 @@ console.log(JSON.stringify(result, null, 2))
 
 if(
     result.version !== result.sourceVersion ||
+    result.packageName !== 'modakbul-season1-launcher' ||
+    result.mainEntry !== 'index.js' ||
+    !result.mainReadable ||
     !result.remoteMain ||
     !result.remoteRenderer ||
     !result.heliosCore ||
