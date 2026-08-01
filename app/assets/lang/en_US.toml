@@ -162,6 +162,7 @@ gameFilesUpdateAvailable = "Game files update v{version}"
 
 [js.landing.launch]
 pleaseWait = "Please wait.."
+waitingForAutomaticUpdates = "Waiting for startup updates to finish.."
 requestAccepted = "Checking your PLAY request..."
 validatingAccount = "Checking your Minecraft account..."
 alreadyLaunching = "A game launch is already in progress..."
@@ -340,6 +341,7 @@ selectAnotherAccountButton = "Select Another Account"
 
 [js.uicore.autoUpdate]
 checkingForUpdateButton = "Checking for Updates..."
+installingAutomaticallyButton = "Applying the launcher update and restarting..."
 installNowButton = "Install Now"
 checkForUpdatesButton = "Check for Updates"
 

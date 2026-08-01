@@ -11,6 +11,7 @@ const remote                         = require('@electron/remote')
 const isDev                          = require('./assets/js/isdev')
 const { LoggerUtil }                 = require('helios-core')
 const Lang                           = require('./assets/js/langloader')
+const CoreGameFileUpdater            = require('./assets/js/gamefileupdater')
 
 const loggerUICore             = LoggerUtil.getLogger('UICore')
 const loggerAutoUpdater        = LoggerUtil.getLogger('AutoUpdater')
@@ -37,10 +38,97 @@ webFrame.setVisualZoomLevelLimits(1, 1)
 
 // Initialize auto updates in production environments.
 let updateCheckListener
+const STARTUP_LAUNCHER_UPDATE_TIMEOUT = 30000
 const pendingUpdates = {
     launcher: null,
     gameFiles: null
 }
+let startupLauncherUpdatePromise = Promise.resolve({ success: true, skipped: true })
+let startupLauncherUpdateResolve = null
+let startupLauncherUpdateTimer = null
+let startupLauncherAutoInstall = false
+let startupLauncherInstallRequested = false
+
+function finishStartupLauncherUpdate(result){
+    if(startupLauncherUpdateResolve == null){
+        return
+    }
+
+    clearTimeout(startupLauncherUpdateTimer)
+    startupLauncherUpdateTimer = null
+    startupLauncherAutoInstall = false
+    const resolve = startupLauncherUpdateResolve
+    startupLauncherUpdateResolve = null
+    resolve(result)
+}
+
+function beginStartupLauncherUpdateCheck(){
+    if(startupLauncherUpdateResolve != null){
+        return startupLauncherUpdatePromise
+    }
+
+    startupLauncherAutoInstall = process.platform !== 'darwin'
+    startupLauncherUpdatePromise = new Promise(resolve => {
+        startupLauncherUpdateResolve = resolve
+    })
+    startupLauncherUpdateTimer = setTimeout(() => {
+        loggerAutoUpdater.warn('Startup launcher update check timed out; continuing without forced installation.')
+        finishStartupLauncherUpdate({ success: false, timedOut: true })
+    }, STARTUP_LAUNCHER_UPDATE_TIMEOUT)
+    ipcRenderer.send('autoUpdateAction', 'checkForUpdate', { startup: true })
+    return startupLauncherUpdatePromise
+}
+
+function waitForStartupLauncherUpdateCheck(){
+    return startupLauncherUpdatePromise
+}
+
+async function installDownloadedStartupLauncherUpdate(info){
+    if(startupLauncherInstallRequested){
+        return
+    }
+    startupLauncherInstallRequested = true
+
+    try {
+        // Never terminate the renderer while the client pack worker is writing
+        // mods/configs. The next launcher is installed only after that repair
+        // has completed (successfully or with a handled failure).
+        if(typeof waitForAutomaticGameFilesUpdate === 'function'){
+            await waitForAutomaticGameFilesUpdate()
+        }
+    } catch(err) {
+        loggerAutoUpdater.warn('Game file update wait failed before launcher installation.', err)
+    }
+
+    if(!startupLauncherAutoInstall){
+        startupLauncherInstallRequested = false
+        settingsUpdateButtonStatus(Lang.queryJS('uicore.autoUpdate.installNowButton'), false, () => {
+            requestLauncherInstallation()
+        })
+        showUpdateUI(info)
+        return
+    }
+
+    await requestLauncherInstallation({
+        silent: true,
+        forceRunAfter: true
+    })
+}
+
+async function requestLauncherInstallation(options = {}){
+    try {
+        await CoreGameFileUpdater.prepareForLauncherInstallation()
+        ipcRenderer.send('autoUpdateAction', 'installUpdateNow', options)
+    } catch(err) {
+        CoreGameFileUpdater.cancelLauncherInstallation()
+        startupLauncherInstallRequested = false
+        loggerAutoUpdater.error('Unable to prepare the launcher update installation.', err)
+        settingsUpdateButtonStatus(Lang.queryJS('uicore.autoUpdate.installNowButton'), false, () => {
+            requestLauncherInstallation(options)
+        })
+    }
+}
+
 if(!isDev){
     ipcRenderer.on('autoUpdateNotification', (event, arg, info) => {
         switch(arg){
@@ -56,12 +144,21 @@ if(!isDev){
                 }
                 showUpdateUI(info)
                 populateSettingsUpdateInformation(info)
+                if(process.platform === 'darwin'){
+                    finishStartupLauncherUpdate({ success: true, updateAvailable: true, manualInstall: true })
+                }
                 break
             case 'update-downloaded':
                 loggerAutoUpdater.info('Update ' + info.version + ' ready to be installed.')
+                if(startupLauncherAutoInstall){
+                    settingsUpdateButtonStatus(Lang.queryJS('uicore.autoUpdate.installingAutomaticallyButton'), true)
+                    showUpdateUI(info)
+                    installDownloadedStartupLauncherUpdate(info)
+                    break
+                }
                 settingsUpdateButtonStatus(Lang.queryJS('uicore.autoUpdate.installNowButton'), false, () => {
                     if(!isDev){
-                        ipcRenderer.send('autoUpdateAction', 'installUpdateNow')
+                        requestLauncherInstallation()
                     }
                 })
                 showUpdateUI(info)
@@ -69,14 +166,17 @@ if(!isDev){
             case 'update-not-available':
                 loggerAutoUpdater.info('No new update found.')
                 settingsUpdateButtonStatus(Lang.queryJS('uicore.autoUpdate.checkForUpdatesButton'))
+                finishStartupLauncherUpdate({ success: true, updateAvailable: false })
                 break
             case 'ready':
                 updateCheckListener = setInterval(() => {
                     ipcRenderer.send('autoUpdateAction', 'checkForUpdate')
                 }, 1800000)
-                ipcRenderer.send('autoUpdateAction', 'checkForUpdate')
+                beginStartupLauncherUpdateCheck()
                 break
             case 'realerror':
+                CoreGameFileUpdater.cancelLauncherInstallation()
+                startupLauncherInstallRequested = false
                 if(info != null && info.code != null){
                     if(info.code === 'ERR_UPDATER_INVALID_RELEASE_FEED'){
                         loggerAutoUpdater.info('No suitable releases found.')
@@ -87,6 +187,7 @@ if(!isDev){
                         loggerAutoUpdater.debug('Error Code:', info.code)
                     }
                 }
+                finishStartupLauncherUpdate({ success: false, error: info })
                 break
             default:
                 loggerAutoUpdater.info('Unknown argument', arg)

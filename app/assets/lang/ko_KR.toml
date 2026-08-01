@@ -162,6 +162,7 @@ gameFilesUpdateAvailable = "게임 파일 업데이트 v{version}"
 
 [js.landing.launch]
 pleaseWait = "잠시만 기다려주세요.."
+waitingForAutomaticUpdates = "시작 업데이트가 끝날 때까지 기다리는 중.."
 requestAccepted = "PLAY 요청을 확인하고 있습니다..."
 validatingAccount = "Minecraft 계정 상태를 확인하고 있습니다..."
 alreadyLaunching = "이미 게임 실행을 준비하고 있습니다..."
@@ -340,6 +341,7 @@ selectAnotherAccountButton = "다른 계정 선택"
 
 [js.uicore.autoUpdate]
 checkingForUpdateButton = "업데이트 확인 중..."
+installingAutomaticallyButton = "런처 업데이트를 적용하고 다시 시작합니다..."
 installNowButton = "지금 설치"
 checkForUpdatesButton = "업데이트 확인"
 

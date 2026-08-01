@@ -58,15 +58,22 @@ function getCurrentView(){
 }
 
 async function showMainUI(data){
+    await prepareSettings(true)
+    updateSelectedServer(data.getServerById(ConfigManager.getSelectedServer()))
+    syncGamePackUpdateNotice(data)
+    startAutomaticGameFilesUpdate()
+        .then(result => {
+            if(result?.success === false){
+                loggerAutoUpdater.warn('Automatic game file update failed; PLAY will retry the repair.', result.error)
+            }
+        })
+        .catch(err => loggerAutoUpdater.warn('Unable to start the automatic game file update.', err))
 
     if(!isDev){
         loggerAutoUpdater.info('Initializing..')
         ipcRenderer.send('autoUpdateAction', 'initAutoUpdater', ConfigManager.getAllowPrerelease())
     }
 
-    await prepareSettings(true)
-    updateSelectedServer(data.getServerById(ConfigManager.getSelectedServer()))
-    syncGamePackUpdateNotice(data)
     refreshServerStatus()
     setTimeout(() => {
         document.getElementById('frameBar').style.backgroundColor = 'rgba(0, 0, 0, 0.5)'

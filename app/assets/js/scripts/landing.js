@@ -15,7 +15,6 @@ const {
     validateLocalFile
 }                             = require('helios-core/common')
 const {
-    FullRepair,
     DistributionIndexProcessor,
     MojangIndexProcessor,
     downloadFile
@@ -31,6 +30,7 @@ const {
 
 // Internal Requirements
 const DiscordWrapper          = require('./assets/js/discordwrapper')
+const LaunchGameFileUpdater   = require('./assets/js/gamefileupdater')
 const ProcessBuilder          = require('./assets/js/processbuilder')
 
 // Launch Elements
@@ -93,27 +93,6 @@ async function withTimeout(promise, timeoutMs, timeoutMessage){
             new Promise((_, reject) => {
                 timeoutHandle = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)
             })
-        ])
-    } finally {
-        clearTimeout(timeoutHandle)
-    }
-}
-
-async function withInactivityTimeout(operation, timeoutMs, timeoutMessage){
-    let timeoutHandle
-    let rejectTimeout
-    const timeoutPromise = new Promise((_, reject) => {
-        rejectTimeout = reject
-    })
-    const refreshTimeout = () => {
-        clearTimeout(timeoutHandle)
-        timeoutHandle = setTimeout(() => rejectTimeout(new Error(timeoutMessage)), timeoutMs)
-    }
-    refreshTimeout()
-    try {
-        return await Promise.race([
-            operation(refreshTimeout),
-            timeoutPromise
         ])
     } finally {
         clearTimeout(timeoutHandle)
@@ -223,6 +202,20 @@ launch_button.addEventListener('click', async e => {
         setLaunchDetails(Lang.queryJS('landing.launch.requestAccepted'))
         toggleLaunchArea(true)
         setLaunchPercentage(0)
+
+        setLaunchDetails(Lang.queryJS('landing.launch.waitingForAutomaticUpdates'))
+        const startupUpdateResults = await Promise.all([
+            typeof waitForStartupLauncherUpdateCheck === 'function'
+                ? waitForStartupLauncherUpdateCheck()
+                : Promise.resolve({ success: true, skipped: true }),
+            typeof waitForAutomaticGameFilesUpdate === 'function'
+                ? waitForAutomaticGameFilesUpdate()
+                : Promise.resolve({ success: true, skipped: true })
+        ])
+        const gameFileUpdateResult = startupUpdateResults[1]
+        if(gameFileUpdateResult?.success === false){
+            appendLaunchLog('WARN', 'The startup game file update failed; PLAY will retry verification.', gameFileUpdateResult.error)
+        }
 
         setLaunchDetails(Lang.queryJS('landing.launch.validatingAccount'))
         let accountValid = false
@@ -711,65 +704,34 @@ async function dlAsync(login = true) {
     toggleLaunchArea(true)
     setLaunchPercentage(0, 100)
 
-    const fullRepairModule = new FullRepair(
-        ConfigManager.getCommonDirectory(),
-        ConfigManager.getInstanceDirectory(),
-        ConfigManager.getLauncherDirectory(),
-        ConfigManager.getSelectedServer(),
-        DistroAPI.isDevMode()
-    )
-
-    fullRepairModule.spawnReceiver()
-    const repairProcess = fullRepairModule.childProcess
-    let repairStage = 'validation'
-    let repairComplete = false
-    let rejectReceiverFailure
-    const receiverFailure = new Promise((_, reject) => {
-        rejectReceiverFailure = reject
-    })
-    const onReceiverError = err => {
-        rejectReceiverFailure(err)
-    }
-    const onReceiverClose = code => {
-        if(!repairComplete){
-            const err = new Error(Lang.queryJS('landing.dlAsync.gameFileWorkerExited', { code }))
-            err.code = code
-            rejectReceiverFailure(err)
-        }
-    }
-    repairProcess.once('error', onReceiverError)
-    repairProcess.once('close', onReceiverClose)
-
     try {
         loggerLaunchSuite.info('Validating files.')
         setLaunchDetails(Lang.queryJS('landing.dlAsync.validatingFileIntegrity'))
-        const invalidFileCount = await Promise.race([
-            withInactivityTimeout(refreshTimeout => fullRepairModule.verifyFiles(percent => {
-                refreshTimeout()
+        const repairResult = await LaunchGameFileUpdater.repairGameFiles({
+            commonDirectory: ConfigManager.getCommonDirectory(),
+            instanceDirectory: ConfigManager.getInstanceDirectory(),
+            launcherDirectory: ConfigManager.getLauncherDirectory(),
+            serverId: serv.rawServer.id,
+            devMode: DistroAPI.isDevMode(),
+            timeoutMessage: Lang.queryJS('landing.launch.repairWorkerTimeout'),
+            onValidationProgress: percent => {
                 setLaunchPercentage(percent)
-            }), 180000, Lang.queryJS('landing.launch.repairWorkerTimeout')),
-            receiverFailure
-        ])
-        setLaunchPercentage(100)
-
-        if(invalidFileCount > 0) {
-            repairStage = 'download'
-            loggerLaunchSuite.info('Downloading files.')
-            setLaunchDetails(Lang.queryJS('landing.dlAsync.downloadingFiles'))
-            setLaunchPercentage(0)
-            await Promise.race([
-                withInactivityTimeout(refreshTimeout => fullRepairModule.download(percent => {
-                    refreshTimeout()
-                    setDownloadPercentage(percent)
-                }), 180000, Lang.queryJS('landing.launch.repairWorkerTimeout')),
-                receiverFailure
-            ])
+            },
+            onDownloadStart: () => {
+                loggerLaunchSuite.info('Downloading files.')
+                setLaunchDetails(Lang.queryJS('landing.dlAsync.downloadingFiles'))
+                setLaunchPercentage(0)
+            },
+            onDownloadProgress: percent => setDownloadPercentage(percent),
+            onNoDownload: () => loggerLaunchSuite.info('No invalid files, skipping download.')
+        })
+        if(repairResult.downloaded){
             setDownloadPercentage(100)
         } else {
-            loggerLaunchSuite.info('No invalid files, skipping download.')
+            setLaunchPercentage(100)
         }
-        repairComplete = true
     } catch(err) {
+        const repairStage = err?.gameFileRepairStage ?? 'validation'
         loggerLaunchSuite.error(`Error during file ${repairStage}.`, err)
         showLaunchFailure(
             repairStage === 'download'
@@ -780,15 +742,6 @@ async function dlAsync(login = true) {
         )
         return
     } finally {
-        repairProcess.removeListener('error', onReceiverError)
-        repairProcess.removeListener('close', onReceiverClose)
-        if(repairProcess.connected){
-            try {
-                fullRepairModule.destroyReceiver()
-            } catch(err) {
-                loggerLaunchSuite.warn('Unable to close the game file worker cleanly.', err)
-            }
-        }
         remote.getCurrentWindow().setProgressBar(-1)
     }
 

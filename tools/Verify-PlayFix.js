@@ -20,6 +20,7 @@ function readArchiveFile(file){
 const indexScript = readArchiveFile('index.js')
 const authManagerScript = readArchiveFile('app/assets/js/authmanager.js')
 const landingScript = readArchiveFile('app/assets/js/scripts/landing.js')
+const gameFileUpdaterScript = readArchiveFile('app/assets/js/gamefileupdater.js')
 const processBuilderScript = readArchiveFile('app/assets/js/processbuilder.js')
 
 const checks = {
@@ -34,9 +35,10 @@ const checks = {
     noFiveSecondSpawnSuccess: !landingScript.includes('onLoadComplete(\'60-second')
         && !landingScript.includes('setTimeout(onLoadComplete'),
     startupTimeoutStopsProcess: landingScript.includes('launchedProcess.kill()'),
-    repairWorkerCleanup: landingScript.includes('receiverFailure')
-        && landingScript.includes('destroyReceiver()'),
-    repairWorkerWatchdog: landingScript.includes('withInactivityTimeout(')
+    repairWorkerCleanup: gameFileUpdaterScript.includes('receiverFailure')
+        && gameFileUpdaterScript.includes('destroyReceiver()'),
+    repairWorkerWatchdog: gameFileUpdaterScript.includes('withInactivityTimeout(')
+        && gameFileUpdaterScript.includes('timeoutMessage')
         && landingScript.includes('repairWorkerTimeout'),
     repeatLaunchArgumentsAreCloned: processBuilderScript.includes('vanillaManifest.arguments.jvm || []')
         && processBuilderScript.includes('vanillaManifest.arguments.game || []')

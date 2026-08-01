@@ -1,6 +1,6 @@
 {
   "name": "modakbul-season1-launcher",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "productName": "모닥불 Season 1",
   "description": "모닥불 Season 1 전용 Minecraft 런처",
   "author": "모닥불 Season 1 운영팀",
@@ -20,6 +20,9 @@
     "lint": "eslint .",
     "test:auth-race": "node tools/Test-AuthValidationRace.js",
     "verify:play-fix": "node tools/Verify-PlayFix.js",
+    "test:memory-defaults": "node tools/Test-MemoryDefaults.js",
+    "test:game-updater": "node tools/Test-GameFileUpdater.js",
+    "verify:auto-update": "node tools/Verify-AutomaticUpdates.js",
     "verify:built": "node tools/Verify-BuiltLauncher.js && node tools/Verify-PlayFix.js"
   },
   "engines": {

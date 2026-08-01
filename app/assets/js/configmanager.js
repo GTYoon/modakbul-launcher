@@ -2,6 +2,7 @@ const fs   = require('fs-extra')
 const { LoggerUtil } = require('helios-core')
 const os   = require('os')
 const path = require('path')
+const MemoryUtil = require('./memoryutil')
 
 const logger = LoggerUtil.getLogger('ConfigManager')
 
@@ -54,9 +55,7 @@ exports.getAbsoluteMinRAM = function(ram){
 }
 
 exports.getAbsoluteMaxRAM = function(_ram){
-    const mem = os.totalmem()
-    const gT16 = mem-(16*1073741824)
-    return Math.floor((mem-(gT16 > 0 ? (Number.parseInt(gT16/8) + (16*1073741824)/4) : mem/4))/1073741824)
+    return MemoryUtil.getUsableMaxRamGiB(os.totalmem())
 }
 
 function resolveSelectedRAM(ram) {
@@ -67,6 +66,10 @@ function resolveSelectedRAM(ram) {
         const mem = os.totalmem()
         return mem >= (8*1073741824) ? '4G' : (mem >= (6*1073741824) ? '3G' : '2G')
     }
+}
+
+function resolveDefaultMaxRAM() {
+    return MemoryUtil.formatUsableMaxRam(os.totalmem())
 }
 
 /**
@@ -543,7 +546,8 @@ function defaultJavaConfig(effectiveJavaOptions, ram) {
 function defaultJavaConfig8(ram) {
     return {
         minRAM: resolveSelectedRAM(ram),
-        maxRAM: resolveSelectedRAM(ram),
+        maxRAM: resolveDefaultMaxRAM(),
+        memoryDefaultsVersion: MemoryUtil.MEMORY_DEFAULTS_VERSION,
         executable: null,
         jvmOptions: [
             '-XX:+UseConcMarkSweepGC',
@@ -557,7 +561,8 @@ function defaultJavaConfig8(ram) {
 function defaultJavaConfig17(ram) {
     return {
         minRAM: resolveSelectedRAM(ram),
-        maxRAM: resolveSelectedRAM(ram),
+        maxRAM: resolveDefaultMaxRAM(),
+        memoryDefaultsVersion: MemoryUtil.MEMORY_DEFAULTS_VERSION,
         executable: null,
         jvmOptions: [
             '-XX:+UnlockExperimentalVMOptions',
@@ -579,6 +584,18 @@ function defaultJavaConfig17(ram) {
 exports.ensureJavaConfig = function(serverid, effectiveJavaOptions, ram) {
     if(!Object.prototype.hasOwnProperty.call(config.javaConfig, serverid)) {
         config.javaConfig[serverid] = defaultJavaConfig(effectiveJavaOptions, ram)
+        return
+    }
+
+    const javaConfig = config.javaConfig[serverid]
+    if(javaConfig.memoryDefaultsVersion == null) {
+        // Existing installations used the recommended/minimum value as both
+        // Xms and Xmx. Migrate only that untouched automatic value; preserve a
+        // max heap the player deliberately customized in launcher settings.
+        if(javaConfig.maxRAM === resolveSelectedRAM(ram)) {
+            javaConfig.maxRAM = resolveDefaultMaxRAM()
+        }
+        javaConfig.memoryDefaultsVersion = MemoryUtil.MEMORY_DEFAULTS_VERSION
     }
 }
 

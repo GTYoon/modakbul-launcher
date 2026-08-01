@@ -28,10 +28,12 @@ function initAutoUpdater(event, data) {
     if(isDev){
         autoUpdater.autoInstallOnAppQuit = false
         autoUpdater.updateConfigPath = path.join(__dirname, 'dev-app-update.yml')
+    } else {
+        autoUpdater.autoInstallOnAppQuit = true
     }
-    if(process.platform === 'darwin'){
-        autoUpdater.autoDownload = false
-    }
+    // macOS still uses the manual DMG flow. Windows/Linux startup checks
+    // download the signed update metadata and package automatically.
+    autoUpdater.autoDownload = process.platform !== 'darwin'
     autoUpdater.on('update-available', (info) => {
         event.sender.send('autoUpdateNotification', 'update-available', info)
     })
@@ -76,7 +78,11 @@ ipcMain.on('autoUpdateAction', (event, arg, data) => {
             }
             break
         case 'installUpdateNow':
-            autoUpdater.quitAndInstall()
+            try {
+                autoUpdater.quitAndInstall(data?.silent === true, data?.forceRunAfter !== false)
+            } catch(err) {
+                event.sender.send('autoUpdateNotification', 'realerror', err)
+            }
             break
         default:
             console.log('Unknown argument', arg)

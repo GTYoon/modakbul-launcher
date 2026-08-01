@@ -14,7 +14,8 @@ files:
   # portable build environment used for this launcher can skip that discovery,
   # leaving app.asar without runtime modules.  build-electron.js prepares the
   # exact production dependency closure in runtime_node_modules instead.
-  - '!{dist,dist-*,node_modules,.gitignore,.vscode,docs,dev-app-update.yml,.nvmrc,eslint.config.mjs,runtime_node_modules}'
+  - '!{dist,dist-*,node_modules,.codex-backups,.gitignore,.vscode,docs,dev-app-update.yml,.nvmrc,eslint.config.mjs,runtime_node_modules}'
+  - '!.codex-backups{,/**}'
   - from: 'runtime_node_modules'
     to: 'node_modules'
     filter:
