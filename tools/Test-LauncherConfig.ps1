@@ -83,6 +83,34 @@ if (Test-Path -LiteralPath $uiBinderPath) {
     }
 }
 
+$builderPath = Join-Path $projectRoot 'electron-builder.yml'
+if (Test-Path -LiteralPath $builderPath) {
+    $builderContent = [IO.File]::ReadAllText($builderPath, [Text.Encoding]::UTF8)
+    if ($builderContent -notmatch "icon:\s*'build/icon\.png'") {
+        $failures.Add('Windows 애플리케이션 아이콘이 build/icon.png로 연결되지 않았습니다.')
+    }
+    if ($builderContent -notmatch 'signAndEditExecutable:\s*true') {
+        $failures.Add('Windows 실행 파일의 아이콘/메타데이터 편집이 활성화되지 않았습니다.')
+    }
+}
+
+$settingsScriptPath = Join-Path $projectRoot 'app\assets\js\scripts\settings.js'
+if (Test-Path -LiteralPath $settingsScriptPath) {
+    $settingsScriptContent = [IO.File]::ReadAllText($settingsScriptPath, [Text.Encoding]::UTF8)
+    if ($settingsScriptContent -notmatch '\(\)\s*=>\s*settingsNavDone\.click\(\)') {
+        $failures.Add('게임 파일 업데이트 완료 버튼이 설정 화면 닫기로 연결되지 않았습니다.')
+    }
+}
+
+$uiCorePath = Join-Path $projectRoot 'app\assets\js\scripts\uicore.js'
+if (Test-Path -LiteralPath $uiCorePath) {
+    $uiCoreContent = [IO.File]::ReadAllText($uiCorePath, [Text.Encoding]::UTF8)
+    if ($uiCoreContent -notmatch 'async function openUpdateTab\(\)' -or
+        $uiCoreContent -notmatch 'await prepareSettings\(\)') {
+        $failures.Add('업데이트 알림에서 설정 화면을 열 때 설정 초기화가 실행되지 않습니다.')
+    }
+}
+
 if ($failures.Count -gt 0) {
     Write-Host '런처 설정 검증 실패:' -ForegroundColor Red
     $failures | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }

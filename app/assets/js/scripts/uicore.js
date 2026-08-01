@@ -107,12 +107,13 @@ function changeAllowPrerelease(val){
     ipcRenderer.send('autoUpdateAction', 'allowPrereleaseChange', val)
 }
 
-function openUpdateTab(){
+async function openUpdateTab(){
     const showTab = () => settingsNavItemListener(document.getElementById('settingsNavUpdate'), false)
     if(getCurrentView() === VIEWS.settings){
         showTab()
         return
     }
+    await prepareSettings()
     switchView(getCurrentView(), VIEWS.settings, 500, 500, showTab)
 }
 

@@ -1585,7 +1585,11 @@ async function checkGameFilesAndLauncher(){
         ConfigManager.setGamePackVersion(server.rawServer.id, String(server.rawServer.version))
         ConfigManager.save()
         populateGamePackVersionInformation(server)
-        settingsUpdateButtonStatus(Lang.queryJS('settings.updates.gameFilesDoneButton'), false, checkGameFilesAndLauncher)
+        settingsUpdateButtonStatus(
+            Lang.queryJS('settings.updates.gameFilesDoneButton'),
+            false,
+            () => settingsNavDone.click()
+        )
         clearGameFilesUpdateUI()
 
         // Keep the executable updater as a second, independent update channel.

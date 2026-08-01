@@ -24,9 +24,10 @@ extraResources:
 
 # Windows Configuration
 win: 
-  # No signing certificate is configured. Avoid Windows-only code-sign tooling so
-  # local and CI release builds remain reproducible without symlink privileges.
-  signAndEditExecutable: false
+  # Keep resource editing enabled so Windows receives the custom icon and product
+  # metadata. No signing certificate is configured for this release.
+  icon: 'build/icon.png'
+  signAndEditExecutable: true
   target: 
     - target: 'nsis'
       arch: 'x64'
